@@ -93,8 +93,7 @@ export default async function AccueilPage() {
         .hero-title{font-size:3rem; font-weight:900; color:#fff; line-height:1.15; letter-spacing:-.8px;}
         .hero-title span{color:#FF6B35;}
         .hero-subtitle{color:rgba(255,255,255,.8); font-size:1.1rem; line-height:1.6;}
-        .hero-search{background:#fff; border-radius:14px; padding:.5rem .5rem .5rem 1rem; display:flex; align-items:center; gap:.5rem; box-shadow:0 8px 32px rgba(0,0,0,.15); transition: box-shadow .2s, transform .2s;}
-        .hero-search:focus-within{ box-shadow:0 12px 40px rgba(0,0,0,.18); transform: translateY(-1px); }
+        .hero-search{background:#fff; border-radius:14px; padding:.5rem .5rem .5rem 1rem; display:flex; align-items:center; gap:.5rem; box-shadow:0 8px 32px rgba(0,0,0,.15); transition: box-shadow .2s, transform .2s; position:relative; z-index:3; margin-bottom:1rem; }
         .hero-search input{border:none; outline:none; flex-grow:1; font-size:.95rem; color:#0F172A; background:transparent;}
         .hero-search input::placeholder{color:#94A3B8;}
         .hero-search .sep-v{width:1px; height:24px; background:#E2E8F0; flex-shrink:0;}
@@ -111,11 +110,11 @@ export default async function AccueilPage() {
         .hero-tag:hover{background:rgba(255,255,255,.25); color:#fff;}
         .hero-visual{ position:relative; display:none; }
         @media(min-width:992px){ .hero-visual{ display:block; } }
-        .hero-img-card{ background:#fff; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.2); transform: rotate(1deg); transition: transform .3s;}
-        .hero-img-card:hover{ transform: rotate(0) scale(1.02); }
-        .hero-float{ position:absolute; background:#fff; border-radius:14px; padding:.75rem 1rem; box-shadow:0 8px 32px rgba(0,0,0,.12); display:flex; align-items:center; gap:.75rem; }
-        .hero-float-1{ bottom:20px; left:-20px; }
-        .hero-float-2{ top:30px; right:-10px; }
+        .hero-img-card{ background:#fff; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.2); transform: rotate(0); transition: transform .3s;}
+        .hero-img-card:hover{ transform: scale(1.02); }
+        .hero-float{ position:absolute; background:#fff; border-radius:14px; padding:.75rem 1rem; box-shadow:0 12px 32px rgba(0,0,0,.15); display:flex; align-items:center; gap:.75rem; z-index:2; }
+        .hero-float-1{ bottom:-14px; left:16px; }
+        .hero-float-2{ top:16px; right:12px; }
         section{padding:4rem 0;}
         .section-title{font-size:1.75rem; font-weight:800; color:#0F172A; letter-spacing:-.4px;}
         .section-subtitle{color:#64748B; font-size:.95rem;}
@@ -173,7 +172,7 @@ export default async function AccueilPage() {
         <div className="container position-relative" style={{ zIndex: 1 }}>
           <div className="row align-items-center g-4">
             <div className="col-lg-6 animate-fade">
-              <h1 className="hero-title mb-3">Trouvez votre<br />emploi idéal au<br /><span>Cameroun</span> 🇨🇲</h1>
+              <h1 className="hero-title mb-3">Trouvez votre<br />emploi idéal au<br /><span>Cameroun</span></h1>
               <p className="hero-subtitle mb-4 animate-fade-2">La plateforme de recrutement #1 en Afrique centrale.<br />Des milliers d&apos;offres vérifiées vous attendent.</p>
 
               <form action="/offres" method="GET" className="animate-fade-3">
