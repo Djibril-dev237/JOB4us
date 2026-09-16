@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { Navbar } from "@/components/Navbar";
 
 export const dynamic = "force-dynamic";
 
@@ -78,13 +79,16 @@ export default async function AccueilPage() {
         .hero-title{font-size:3rem; font-weight:900; color:#fff; line-height:1.15; letter-spacing:-.8px;}
         .hero-title span{color:#FF6B35;}
         .hero-subtitle{color:rgba(255,255,255,.8); font-size:1.1rem; line-height:1.6;}
-        .hero-search{background:#fff; border-radius:14px; padding:.5rem .5rem .5rem 1rem; display:flex; align-items:center; gap:.5rem; box-shadow:0 8px 32px rgba(0,0,0,.15);}
+        .hero-search{background:#fff; border-radius:14px; padding:.5rem .5rem .5rem 1rem; display:flex; align-items:center; gap:.5rem; box-shadow:0 8px 32px rgba(0,0,0,.15); transition: box-shadow .2s, transform .2s;}
+        .hero-search:focus-within{ box-shadow:0 12px 40px rgba(0,0,0,.18); transform: translateY(-1px); }
         .hero-search input{border:none; outline:none; flex-grow:1; font-size:.95rem; color:#0F172A; background:transparent;}
         .hero-search input::placeholder{color:#94A3B8;}
         .hero-search .sep-v{width:1px; height:24px; background:#E2E8F0; flex-shrink:0;}
         .hero-search .city-input{border:none; outline:none; width:160px; font-size:.95rem; color:#0F172A; background:transparent;}
         .btn-search{background:var(--primary); color:#fff; border:none; border-radius:10px; padding:.75rem 1.5rem; font-weight:700; font-size:.9rem; white-space:nowrap; transition:all .2s; flex-shrink:0;}
-        .btn-search:hover{background:var(--primary-dark);}
+        .btn-search:hover{background:var(--primary-dark); transform: translateY(-1px); box-shadow:0 4px 12px rgba(0,102,255,.3);}
+        .btn-search:active{ transform: translateY(0); }
+        @media (max-width: 576px){ .hero-search{ flex-wrap:wrap; padding:.75rem; } .hero-search .sep-v{ display:none; } .hero-search .city-input{ width:100%; } .btn-search{ width:100%; } }
         .hero-stats{display:flex; gap:2rem; margin-top:2rem;}
         .hero-stat .hs-number{font-size:1.5rem; font-weight:800; color:#fff; letter-spacing:-.3px;}
         .hero-stat .hs-label{font-size:.78rem; color:rgba(255,255,255,.7); font-weight:500;}
@@ -94,13 +98,16 @@ export default async function AccueilPage() {
         section{padding:4rem 0;}
         .section-title{font-size:1.75rem; font-weight:800; color:#0F172A; letter-spacing:-.4px;}
         .section-subtitle{color:#64748B; font-size:.95rem;}
-        .cat-card{background:#F8FAFF; border:1.5px solid #E2E8F0; border-radius:14px; padding:1.25rem; text-decoration:none; transition:all .2s; display:block;}
-        .cat-card:hover{border-color:var(--primary); background:#EFF6FF; transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,102,255,.1);}
-        .cat-icon{width:46px; height:46px; border-radius:12px; background:#EFF6FF; display:flex; align-items:center; justify-content:center; font-size:1.2rem; color:var(--primary); margin-bottom:.75rem;}
+        .cat-card{background:#F8FAFF; border:1.5px solid #E2E8F0; border-radius:14px; padding:1.25rem; text-decoration:none; transition:all .25s cubic-bezier(.4,0,.2,1); display:block; will-change: transform;}
+        .cat-card:hover{border-color:var(--primary); background:#EFF6FF; transform:translateY(-4px) scale(1.02); box-shadow:0 12px 32px rgba(0,102,255,.12);}
+        .cat-card:focus-visible{ outline:2px solid var(--primary); outline-offset:2px; }
+        .cat-icon{width:46px; height:46px; border-radius:12px; background:#EFF6FF; display:flex; align-items:center; justify-content:center; font-size:1.2rem; color:var(--primary); margin-bottom:.75rem; transition: transform .2s;}
+        .cat-card:hover .cat-icon{ transform: scale(1.1) rotate(3deg); }
         .cat-name{font-size:.9rem; font-weight:700; color:#0F172A;}
         .cat-count{font-size:.75rem; color:#64748B; margin-top:.2rem;}
-        .offre-card{border:1.5px solid #E2E8F0; border-radius:14px; padding:1.25rem; transition:all .2s; background:#fff; text-decoration:none; display:block;}
-        .offre-card:hover{border-color:var(--primary); box-shadow:0 8px 24px rgba(0,102,255,.08); transform:translateY(-2px);}
+        .offre-card{border:1.5px solid #E2E8F0; border-radius:14px; padding:1.25rem; transition:all .25s cubic-bezier(.4,0,.2,1); background:#fff; text-decoration:none; display:block; will-change: transform;}
+        .offre-card:hover{border-color:var(--primary); box-shadow:0 12px 32px rgba(0,102,255,.12); transform:translateY(-4px);}
+        .offre-card:focus-visible{ outline:2px solid var(--primary); outline-offset:2px; }
         .offre-logo{width:46px; height:46px; border-radius:10px; background:#EFF6FF; display:flex; align-items:center; justify-content:center; font-size:.85rem; font-weight:700; color:var(--primary); flex-shrink:0;}
         .offre-titre{font-size:.95rem; font-weight:700; color:#0F172A;}
         .offre-entreprise{font-size:.82rem; color:var(--primary); font-weight:600;}
@@ -132,70 +139,35 @@ export default async function AccueilPage() {
         .footer-bottom{border-top:1px solid #1E293B; margin-top:2rem; padding-top:1.5rem; font-size:.8rem;}
       `}</style>
 
-      {/* NAVBAR */}
-      <nav className="navbar-accueil d-flex justify-content-between align-items-center">
-        <Link href="/" className="text-decoration-none d-flex align-items-center gap-2">
-          <div className="logo-badge">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </div>
-          <div className="sep"></div>
-          <div>
-            <div><span className="logo-job">Job</span><span className="logo-4us">4Us</span></div>
-            <div className="logo-tagline">Cameroun · Afrique</div>
-          </div>
-        </Link>
-
-        <div className="d-none d-lg-flex align-items-center gap-4">
-          <Link href="/offres" className="text-decoration-none text-muted fw-medium" style={{ fontSize: ".9rem" }}>Offres d'emploi</Link>
-          <a href="#categories" className="text-decoration-none text-muted fw-medium" style={{ fontSize: ".9rem" }}>Catégories</a>
-          <a href="#comment" className="text-decoration-none text-muted fw-medium" style={{ fontSize: ".9rem" }}>Comment ça marche</a>
-        </div>
-
-        <div className="d-flex align-items-center gap-2">
-          {session ? (
-            <>
-              {session.user.role === "candidat" && <Link href="/candidat" className="btn btn-primary btn-sm rounded-pill px-3">Mon espace</Link>}
-              {session.user.role === "recruteur" && <Link href="/recruteur" className="btn btn-primary btn-sm rounded-pill px-3">Mon espace</Link>}
-              {session.user.role === "admin" && <Link href="/admin" className="btn btn-primary btn-sm rounded-pill px-3">Admin</Link>}
-            </>
-          ) : (
-            <>
-              <Link href="/login" className="btn btn-outline-primary btn-sm rounded-pill px-3" style={{ fontSize: ".875rem" }}>Connexion</Link>
-              <Link href="/register" className="btn btn-primary btn-sm rounded-pill px-3" style={{ fontSize: ".875rem" }}>S&apos;inscrire</Link>
-            </>
-          )}
-        </div>
-      </nav>
+      <Navbar isLoggedIn={!!session} role={session?.user.role} />
 
       {/* HERO */}
       <section className="hero">
         <div className="container position-relative" style={{ zIndex: 1 }}>
           <div className="row align-items-center">
-            <div className="col-lg-7">
+            <div className="col-lg-7 animate-fade">
               <h1 className="hero-title mb-3">Trouvez votre<br />emploi idéal au<br /><span>Cameroun</span> 🇨🇲</h1>
-              <p className="hero-subtitle mb-4">La plateforme de recrutement #1 en Afrique centrale.<br />Des milliers d&apos;offres vérifiées vous attendent.</p>
+              <p className="hero-subtitle mb-4 animate-fade-2">La plateforme de recrutement #1 en Afrique centrale.<br />Des milliers d&apos;offres vérifiées vous attendent.</p>
 
-              <form action="/offres" method="GET">
+              <form action="/offres" method="GET" className="animate-fade-3">
                 <div className="hero-search">
                   <i className="bi bi-search text-muted" style={{ fontSize: "1rem", flexShrink: 0 }}></i>
-                  <input type="text" name="q" placeholder="Titre du poste, compétence..." />
+                  <input type="text" name="q" placeholder="Titre du poste, compétence..." aria-label="Recherche poste" />
                   <div className="sep-v"></div>
                   <i className="bi bi-geo-alt text-muted" style={{ fontSize: "1rem", flexShrink: 0 }}></i>
-                  <input type="text" name="ville" className="city-input" placeholder="Ville..." />
+                  <input type="text" name="ville" className="city-input" placeholder="Ville..." aria-label="Ville" />
                   <button type="submit" className="btn-search"><i className="bi bi-search me-1"></i>Rechercher</button>
                 </div>
               </form>
 
-              <div className="hero-tags">
+              <div className="hero-tags animate-fade-3">
                 <span style={{ color: "rgba(255,255,255,.6)", fontSize: ".8rem", alignSelf: "center" }}>Populaire :</span>
                 {["Développeur", "Comptable", "Commercial", "Marketing", "RH"].map((tag) => (
                   <Link key={tag} href={`/offres?q=${encodeURIComponent(tag)}`} className="hero-tag">{tag}</Link>
                 ))}
               </div>
 
-              <div className="hero-stats">
+              <div className="hero-stats animate-fade-3">
                 <div className="hero-stat"><div className="hs-number">{stats.offres}+</div><div className="hs-label">Offres actives</div></div>
                 <div className="hero-stat"><div className="hs-number">{stats.entreprises}+</div><div className="hs-label">Entreprises</div></div>
                 <div className="hero-stat"><div className="hs-number">{stats.candidats}+</div><div className="hs-label">Candidats</div></div>
@@ -218,10 +190,14 @@ export default async function AccueilPage() {
 
           <div className="row g-3">
             {categories.length === 0 ? (
-              <div className="col-12 text-muted text-center py-4">Aucune catégorie — ajoute-en via Prisma Studio</div>
+              <div className="col-12 text-center py-5">
+                <div className="mx-auto mb-3 d-flex align-items-center justify-content-center" style={{ width: 64, height: 64, background: "#EFF6FF", borderRadius: 16 }}><i className="bi bi-grid" style={{ fontSize: "1.5rem", color: "#0066FF" }}></i></div>
+                <p className="text-muted mb-2">Aucune catégorie pour l&apos;instant</p>
+                <p className="small text-muted">Ajoute des catégories via <code>npx prisma studio</code></p>
+              </div>
             ) : categories.map((c: any) => (
               <div key={c.id} className="col-lg-2 col-md-3 col-sm-4 col-6">
-                <Link href={`/offres?categorie=${c.id}`} className="cat-card">
+                <Link href={`/offres?categorie=${c.id}`} className="cat-card" aria-label={`Voir offres ${c.nom}`}>
                   <div className="cat-icon"><i className={`bi ${iconFor(c.nom)}`}></i></div>
                   <div className="cat-name">{c.nom}</div>
                   <div className="cat-count">{c.offres_count} offre(s)</div>
@@ -245,15 +221,17 @@ export default async function AccueilPage() {
 
           <div className="row g-3">
             {offres.length === 0 ? (
-              <div className="col-12 text-center text-muted py-4">
-                <i className="bi bi-briefcase fs-1 d-block mb-3 opacity-25"></i>
-                <div>Aucune offre disponible pour le moment</div>
+              <div className="col-12 text-center py-5">
+                <div className="mx-auto mb-3 d-flex align-items-center justify-content-center" style={{ width: 64, height: 64, background: "#FFF7ED", borderRadius: 16 }}><i className="bi bi-briefcase" style={{ fontSize: "1.5rem", color: "#FF6B35" }}></i></div>
+                <p className="fw-semibold mb-1">Aucune offre pour le moment</p>
+                <p className="small text-muted mb-3">Sois le premier à publier une offre !</p>
+                <Link href="/recruteur" className="btn btn-primary rounded-pill px-4">Publier une offre</Link>
               </div>
             ) : offres.map((o: any) => (
               <div key={o.id} className="col-lg-4 col-md-6">
-                <Link href={`/offres/${o.id}`} className="offre-card">
+                <Link href={`/offres/${o.id}`} className="offre-card" aria-label={`Voir offre ${o.titre}`}>
                   <div className="d-flex align-items-start gap-3 mb-3">
-                    <div className="offre-logo">{(o.entreprise?.nom || "E").slice(0, 2).toUpperCase()}</div>
+                    <div className="offre-logo" aria-hidden>{(o.entreprise?.nom || "E").slice(0, 2).toUpperCase()}</div>
                     <div className="flex-grow-1 min-w-0">
                       <div className="offre-titre text-truncate">{o.titre}</div>
                       <div className="offre-entreprise">{o.entreprise?.nom || "Entreprise"}</div>
@@ -265,7 +243,7 @@ export default async function AccueilPage() {
                     {o.categorie && <span className="offre-tag tag-niveau">{o.categorie.nom}</span>}
                   </div>
                   <div className="d-flex justify-content-between align-items-center">
-                    <span style={{ fontSize: ".75rem", color: "#94A3B8" }}><i className="bi bi-clock me-1"></i>{new Date(o.createdAt).toLocaleDateString("fr-FR")}</span>
+                    <span style={{ fontSize: ".75rem", color: "#94A3B8" }}><i className="bi bi-clock me-1" aria-hidden></i>{new Date(o.createdAt).toLocaleDateString("fr-FR")}</span>
                     <span style={{ fontSize: ".78rem", color: "var(--primary)", fontWeight: 600 }}>Voir l&apos;offre →</span>
                   </div>
                 </Link>

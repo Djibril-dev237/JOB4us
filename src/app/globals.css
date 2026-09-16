@@ -13,11 +13,28 @@
 }
 
 * { font-family: 'Inter', sans-serif; box-sizing: border-box; }
-
+html { scroll-behavior: smooth; }
 body {
   background: #fff;
   color: #0F172A;
   font-family: 'Inter', sans-serif;
 }
+/* Focus visible pour accessibilité */
+*:focus-visible { outline: 2px solid #0066FF; outline-offset: 2px; border-radius: 4px; }
+/* Améliorations UX */
+.nav-link-custom { text-decoration: none; color: #64748B; font-size: .9rem; font-weight: 500; position: relative; transition: color .2s; }
+.nav-link-custom::after { content:''; position:absolute; left:0; bottom:-4px; width:0; height:2px; background:#0066FF; transition: width .2s; border-radius:2px; }
+.nav-link-custom:hover { color: #0066FF; }
+.nav-link-custom:hover::after { width: 100%; }
+.mobile-menu { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border-top: 1px solid #E2E8F0; box-shadow: 0 8px 32px rgba(0,0,0,.08); padding: 1rem; display: flex; flex-direction: column; gap: .25rem; animation: slideDown .2s ease; z-index: 99; }
+.mobile-link { padding: .75rem 1rem; border-radius: 10px; text-decoration: none; color: #0F172A; font-weight: 500; transition: all .15s; }
+.mobile-link:hover { background: #EFF6FF; color: #0066FF; }
+@keyframes slideDown { from { opacity:0; transform: translateY(-8px);} to { opacity:1; transform: translateY(0);} }
+@keyframes fadeInUp { from { opacity:0; transform: translateY(16px);} to { opacity:1; transform: translateY(0);} }
+.animate-fade { animation: fadeInUp .6s ease both; }
+.animate-fade-2 { animation: fadeInUp .6s .15s ease both; }
+.animate-fade-3 { animation: fadeInUp .6s .3s ease both; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
 
 /* On garde Tailwind mais on désactive son preflight agressif sur certains éléments Bootstrap */
