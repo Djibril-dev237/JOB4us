@@ -1,0 +1,314 @@
+// JOB4Us - Converti depuis Laravel emploi-app
+// Provider MySQL pour garder ta BDD emploi_app. Pour dev sans MySQL, change en sqlite et DATABASE_URL="file:./dev.db"
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums = tes enums Laravel
+enum Role {
+  candidat
+  recruteur
+  admin
+}
+
+enum Genre {
+  homme
+  femme
+  autre
+}
+
+enum Disponibilite {
+  immediat
+  un_mois  @map("1_mois")
+  trois_mois @map("3_mois")
+  non_disponible
+}
+
+enum TypeContrat {
+  CDI
+  CDD
+  stage
+  freelance
+  temps_partiel
+}
+
+enum NiveauExperience {
+  sans_experience
+  junior
+  intermediaire
+  senior
+}
+
+enum StatutCandidature {
+  envoyee
+  vue
+  retenue
+  refusee
+  entretien
+}
+
+enum NiveauCompetence {
+  debutant
+  intermediaire
+  avance
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  name            String    @db.VarChar(100)
+  email           String?   @unique @db.VarChar(150)
+  password        String
+  role            Role
+  avatar          String?   @db.VarChar(255)
+  phone           String?   @db.VarChar(20)
+  ville           String?   @db.VarChar(100)
+  pays            String    @default("Cameroun") @db.VarChar(100)
+  isActive        Boolean   @default(true) @map("is_active")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  rememberToken   String?   @map("remember_token")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  candidat          Candidat?
+  entreprise        Entreprise?
+  notifications     Notification[]
+  messagesEnvoyes   Message[] @relation("MessageSender")
+  offresSauvegardees Offre[]   @relation("OffresSauvegardees")
+
+  @@map("users")
+}
+
+model Candidat {
+  id             Int            @id @default(autoincrement())
+  userId         Int            @unique @map("user_id")
+  titreProfil    String?        @map("titre_profil") @db.VarChar(150)
+  resume         String?        @db.Text
+  cvPath         String?        @map("cv_path")
+  dateNaissance  DateTime?      @map("date_naissance") @db.Date
+  genre          Genre?
+  disponibilite  Disponibilite  @default(immediat)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competences  CandidatCompetence[]
+  experiences  Experience[]
+  formations   Formation[]
+  candidatures Candidature[]
+  conversations Conversation[]
+
+  @@map("candidats")
+}
+
+model Entreprise {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique @map("user_id")
+  nom              String   @db.VarChar(150)
+  description      String?  @db.Text
+  secteur          String?  @db.VarChar(100) // ancien champ
+  secteurActivite  String?  @map("secteur_activite")
+  taille           String?  @db.VarChar(20) // ancien 1-10 etc
+  tailleEntreprise String?  @map("taille_entreprise")
+  siteWeb          String?  @map("site_web")
+  emailContact     String?  @map("email_contact")
+  telephone        String?
+  adresse          String?
+  logo             String?
+  ville            String?  @db.VarChar(100)
+  pays             String   @default("Cameroun") @db.VarChar(100)
+  isVerified       Boolean  @default(false) @map("is_verified")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offres        Offre[]
+  conversations Conversation[] @relation("EntrepriseConversations")
+
+  @@map("entreprises")
+}
+
+model Categorie {
+  id        Int      @id @default(autoincrement())
+  nom       String   @unique @db.VarChar(100)
+  icone     String?  @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  offres Offre[]
+
+  @@map("categories")
+}
+
+model Competence {
+  id        Int      @id @default(autoincrement())
+  nom       String   @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  candidats CandidatCompetence[]
+  offres    OffreCompetence[]
+
+  @@map("competences")
+}
+
+model CandidatCompetence {
+  candidatId   Int              @map("candidat_id")
+  competenceId Int              @map("competence_id")
+  niveau       NiveauCompetence @default(intermediaire)
+
+  candidat   Candidat   @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  competence Competence @relation(fields: [competenceId], references: [id], onDelete: Cascade)
+
+  @@id([candidatId, competenceId])
+  @@map("candidat_competences")
+}
+
+model Offre {
+  id               Int              @id @default(autoincrement())
+  entrepriseId     Int              @map("entreprise_id")
+  categorieId      Int              @map("categorie_id")
+  titre            String           @db.VarChar(200)
+  description      String           @db.LongText
+  typeContrat      TypeContrat      @map("type_contrat")
+  niveauExperience NiveauExperience @map("niveau_experience")
+  ville            String           @db.VarChar(100)
+  pays             String           @default("Cameroun") @db.VarChar(100)
+  salaireMin       Decimal?         @map("salaire_min") @db.Decimal(10, 2)
+  salaireMax       Decimal?         @map("salaire_max") @db.Decimal(10, 2)
+  salaireVisible   Boolean          @default(false) @map("salaire_visible")
+  dateExpiration   DateTime         @map("date_expiration") @db.Date
+  isActive         Boolean          @default(true) @map("is_active")
+  vues             Int              @default(0) @db.UnsignedInt
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  entreprise   Entreprise        @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
+  categorie    Categorie         @relation(fields: [categorieId], references: [id])
+  competences  OffreCompetence[]
+  candidatures Candidature[]
+  conversations Conversation[]
+  sauvegardePar User[]           @relation("OffresSauvegardees")
+
+  @@map("offres")
+}
+
+model OffreCompetence {
+  offreId      Int @map("offre_id")
+  competenceId Int @map("competence_id")
+
+  offre      Offre      @relation(fields: [offreId], references: [id], onDelete: Cascade)
+  competence Competence @relation(fields: [competenceId], references: [id], onDelete: Cascade)
+
+  @@id([offreId, competenceId])
+  @@map("offre_competences")
+}
+
+model Experience {
+  id         Int       @id @default(autoincrement())
+  candidatId Int       @map("candidat_id")
+  poste      String    @db.VarChar(150)
+  entreprise String    @db.VarChar(150)
+  ville      String?   @db.VarChar(100)
+  dateDebut  DateTime  @map("date_debut") @db.Date
+  dateFin    DateTime? @map("date_fin") @db.Date
+  description String?  @db.Text
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  candidat Candidat @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+
+  @@map("experiences")
+}
+
+model Formation {
+  id            Int       @id @default(autoincrement())
+  candidatId    Int       @map("candidat_id")
+  diplome       String    @db.VarChar(150)
+  etablissement String    @db.VarChar(150)
+  ville         String?   @db.VarChar(100)
+  dateDebut     DateTime  @map("date_debut") @db.Date
+  dateFin       DateTime? @map("date_fin") @db.Date
+  description   String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  candidat Candidat @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+
+  @@map("formations")
+}
+
+model Candidature {
+  id               Int               @id @default(autoincrement())
+  offreId          Int               @map("offre_id")
+  candidatId       Int               @map("candidat_id")
+  lettreMotivation String?           @map("lettre_motivation") @db.Text
+  cvPath           String?           @map("cv_path")
+  statut           StatutCandidature @default(envoyee)
+  noteRecruteur    String?           @map("note_recruteur") @db.Text
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  offre    Offre    @relation(fields: [offreId], references: [id], onDelete: Cascade)
+  candidat Candidat @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+
+  @@unique([offreId, candidatId])
+  @@map("candidatures")
+}
+
+model Conversation {
+  id          Int      @id @default(autoincrement())
+  candidatId  Int      @map("candidat_id")
+  recruteurId Int      @map("recruteur_id") // references entreprises.id
+  offreId     Int?     @map("offre_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  candidat  Candidat   @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  recruteur Entreprise @relation("EntrepriseConversations", fields: [recruteurId], references: [id], onDelete: Cascade)
+  offre     Offre?     @relation(fields: [offreId], references: [id], onDelete: SetNull)
+  messages  Message[]
+
+  @@unique([candidatId, recruteurId, offreId])
+  @@map("conversations")
+}
+
+model Message {
+  id             Int      @id @default(autoincrement())
+  conversationId Int      @map("conversation_id")
+  senderId       Int      @map("sender_id")
+  contenu        String   @db.Text
+  isLu           Boolean  @default(false) @map("is_lu")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  type      String   @db.VarChar(100)
+  titre     String   @db.VarChar(200)
+  contenu   String?  @db.Text
+  isLu      Boolean  @default(false) @map("is_lu")
+  lien      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// Table pivot offres_sauvegardees gérée via relation Many-to-Many implicite User <-> Offre
+// Si tu veux l'expliciter, la table sera créée automatiquement par Prisma
