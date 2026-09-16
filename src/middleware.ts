@@ -1,14 +1,28 @@
-// Middleware Next.js - équivalent des middlewares Laravel IsCandidat / IsRecruteur / IsAdmin
-// Pour l'instant exemple sans next-auth, à activer après install
-
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
 
-export function middleware(request: NextRequest) {
-  // Exemple: protège /candidat, /recruteur, /admin
-  // Quand Auth.js sera installé, vérifier le token ici
-  // const token = await getToken({ req: request })
-  // if (!token) return NextResponse.redirect(new URL("/login", request.url))
+// Équivalent Laravel: middleware IsCandidat, IsRecruteur, IsAdmin
+export async function middleware(request: NextRequest) {
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  const path = request.nextUrl.pathname;
+
+  // Pas connecté -> login
+  if (!token) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  const role = token.role as string;
+
+  if (path.startsWith("/candidat") && role !== "candidat" && role !== "admin") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  if (path.startsWith("/recruteur") && role !== "recruteur" && role !== "admin") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  if (path.startsWith("/admin") && role !== "admin") {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
 
   return NextResponse.next();
 }
