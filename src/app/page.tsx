@@ -63,6 +63,19 @@ export default async function AccueilPage() {
     return "bi-briefcase";
   }
 
+  const catImages: Record<string, string> = {
+    Informatique: "https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=400&auto=format&fit=crop",
+    Finance: "https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=400&auto=format&fit=crop",
+    Marketing: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=80&w=400&auto=format&fit=crop",
+    RH: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?q=80&w=400&auto=format&fit=crop",
+    Commerce: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?q=80&w=400&auto=format&fit=crop",
+    Santé: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?q=80&w=400&auto=format&fit=crop",
+  };
+  function imageFor(nom: string) {
+    for (const [k, v] of Object.entries(catImages)) if (nom.includes(k)) return v;
+    return "https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=400&auto=format&fit=crop";
+  }
+
   return (
     <>
       <style>{`
@@ -106,10 +119,13 @@ export default async function AccueilPage() {
         section{padding:4rem 0;}
         .section-title{font-size:1.75rem; font-weight:800; color:#0F172A; letter-spacing:-.4px;}
         .section-subtitle{color:#64748B; font-size:.95rem;}
-        .cat-card{background:#F8FAFF; border:1.5px solid #E2E8F0; border-radius:14px; padding:1.25rem; text-decoration:none; transition:all .25s cubic-bezier(.4,0,.2,1); display:block; will-change: transform;}
+        .cat-card{background:#F8FAFF; border:1.5px solid #E2E8F0; border-radius:14px; padding:0; text-decoration:none; transition:all .25s cubic-bezier(.4,0,.2,1); display:block; will-change: transform; overflow:hidden; }
         .cat-card:hover{border-color:var(--primary); background:#EFF6FF; transform:translateY(-4px) scale(1.02); box-shadow:0 12px 32px rgba(0,102,255,.12);}
         .cat-card:focus-visible{ outline:2px solid var(--primary); outline-offset:2px; }
-        .cat-icon{width:46px; height:46px; border-radius:12px; background:#EFF6FF; display:flex; align-items:center; justify-content:center; font-size:1.2rem; color:var(--primary); margin-bottom:.75rem; transition: transform .2s;}
+        .cat-img{ height:90px; position:relative; overflow:hidden; background:#EFF6FF; }
+        .cat-img img{ transition: transform .3s; }
+        .cat-card:hover .cat-img img{ transform: scale(1.1); }
+        .cat-icon{width:46px; height:46px; border-radius:12px; background:#EFF6FF; display:flex; align-items:center; justify-content:center; font-size:1.2rem; color:var(--primary); position:absolute; bottom:-16px; left:1rem; border:2px solid #fff; box-shadow:0 4px 12px rgba(0,0,0,.08); transition: transform .2s;}
         .cat-card:hover .cat-icon{ transform: scale(1.1) rotate(3deg); }
         .cat-name{font-size:.9rem; font-weight:700; color:#0F172A;}
         .cat-count{font-size:.75rem; color:#64748B; margin-top:.2rem;}
@@ -145,6 +161,9 @@ export default async function AccueilPage() {
         .footer-link{display:block; color:#64748B; font-size:.875rem; text-decoration:none; margin-bottom:.5rem; transition:color .15s;}
         .footer-link:hover{color:#fff;}
         .footer-bottom{border-top:1px solid #1E293B; margin-top:2rem; padding-top:1.5rem; font-size:.8rem;}
+        .testimonial-card{ background:#fff; border:1.5px solid #E2E8F0; border-radius:16px; padding:1.5rem; transition: all .2s; height:100%; }
+        .testimonial-card:hover{ border-color:#0066FF; box-shadow:0 8px 24px rgba(0,102,255,.08); transform: translateY(-2px); }
+        .stars{ color:#F59E0B; font-size:.9rem; }
       `}</style>
 
       <Navbar isLoggedIn={!!session} role={session?.user.role} />
@@ -234,9 +253,14 @@ export default async function AccueilPage() {
             ) : categories.map((c: any) => (
               <div key={c.id} className="col-lg-2 col-md-3 col-sm-4 col-6">
                 <Link href={`/offres?categorie=${c.id}`} className="cat-card" aria-label={`Voir offres ${c.nom}`}>
-                  <div className="cat-icon"><i className={`bi ${iconFor(c.nom)}`}></i></div>
-                  <div className="cat-name">{c.nom}</div>
-                  <div className="cat-count">{c.offres_count} offre(s)</div>
+                  <div className="cat-img">
+                    <Image src={imageFor(c.nom)} alt={c.nom} fill style={{ objectFit: "cover" }} sizes="200px" />
+                    <div className="cat-icon"><i className={`bi ${iconFor(c.nom)}`}></i></div>
+                  </div>
+                  <div style={{ padding: "1rem 1.25rem 1.25rem", paddingTop: "1.75rem" }}>
+                    <div className="cat-name">{c.nom}</div>
+                    <div className="cat-count">{c.offres_count} offre(s)</div>
+                  </div>
                 </Link>
               </div>
             ))}
@@ -358,6 +382,37 @@ export default async function AccueilPage() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* TEMOIGNAGES */}
+      <section style={{ padding: "4rem 0", background: "#fff" }}>
+        <div className="container">
+          <div className="text-center mb-5">
+            <h2 className="section-title mb-2">Ils ont trouvé leur emploi</h2>
+            <p className="section-subtitle">Des milliers de Camerounais nous font confiance</p>
+          </div>
+          <div className="row g-4">
+            {[
+              { name: "Aïcha M.", role: "Développeuse chez Orange Cameroun", img: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=200&auto=format&fit=crop", text: "En 2 semaines j'ai trouvé mon poste idéal. L'interface est super claire et les offres sont vérifiées." },
+              { name: "Samuel T.", role: "Comptable chez TotalEnergies", img: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&auto=format&fit=crop", text: "Job4Us m'a permis de filtrer par ville et contrat. J'ai postulé en 1 clic et eu une réponse en 3 jours." },
+              { name: "Grace K.", role: "Marketing chez MTN", img: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop", text: "En tant que recruteuse, je gère mes offres et candidatures facilement. Le meilleur site d'emploi au Cameroun." },
+            ].map((t) => (
+              <div key={t.name} className="col-lg-4 col-md-6">
+                <div className="testimonial-card">
+                  <div className="stars mb-2"><i className="bi bi-star-fill"></i><i className="bi bi-star-fill"></i><i className="bi bi-star-fill"></i><i className="bi bi-star-fill"></i><i className="bi bi-star-fill"></i></div>
+                  <p style={{ fontSize: ".9rem", color: "#334155", lineHeight: 1.6, fontStyle: "italic" }}>&quot;{t.text}&quot;</p>
+                  <div className="d-flex align-items-center gap-3 mt-3">
+                    <Image src={t.img} alt={t.name} width={44} height={44} style={{ borderRadius: "50%", objectFit: "cover" }} />
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: ".9rem" }}>{t.name}</div>
+                      <div style={{ fontSize: ".78rem", color: "#64748B" }}>{t.role}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
