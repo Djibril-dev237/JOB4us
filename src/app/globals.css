@@ -1,26 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
+@import "bootstrap/dist/css/bootstrap.min.css";
+@import "bootstrap-icons/font/bootstrap-icons.css";
 
 :root {
+  --primary: #0066FF;
+  --primary-dark: #0044BB;
+  --primary-light: #EFF6FF;
+  --secondary: #FF6B35;
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0F172A;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+* { font-family: 'Inter', sans-serif; box-sizing: border-box; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #fff;
+  color: #0F172A;
+  font-family: 'Inter', sans-serif;
 }
+
+/* On garde Tailwind mais on désactive son preflight agressif sur certains éléments Bootstrap */
