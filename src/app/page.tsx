@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
@@ -95,6 +96,13 @@ export default async function AccueilPage() {
         .hero-tags{display:flex; flex-wrap:wrap; gap:.5rem; margin-top:1.25rem;}
         .hero-tag{background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.2); border-radius:20px; padding:.3rem .85rem; font-size:.8rem; font-weight:500; text-decoration:none; transition:all .2s;}
         .hero-tag:hover{background:rgba(255,255,255,.25); color:#fff;}
+        .hero-visual{ position:relative; display:none; }
+        @media(min-width:992px){ .hero-visual{ display:block; } }
+        .hero-img-card{ background:#fff; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.2); transform: rotate(1deg); transition: transform .3s;}
+        .hero-img-card:hover{ transform: rotate(0) scale(1.02); }
+        .hero-float{ position:absolute; background:#fff; border-radius:14px; padding:.75rem 1rem; box-shadow:0 8px 32px rgba(0,0,0,.12); display:flex; align-items:center; gap:.75rem; }
+        .hero-float-1{ bottom:20px; left:-20px; }
+        .hero-float-2{ top:30px; right:-10px; }
         section{padding:4rem 0;}
         .section-title{font-size:1.75rem; font-weight:800; color:#0F172A; letter-spacing:-.4px;}
         .section-subtitle{color:#64748B; font-size:.95rem;}
@@ -144,8 +152,8 @@ export default async function AccueilPage() {
       {/* HERO */}
       <section className="hero">
         <div className="container position-relative" style={{ zIndex: 1 }}>
-          <div className="row align-items-center">
-            <div className="col-lg-7 animate-fade">
+          <div className="row align-items-center g-4">
+            <div className="col-lg-6 animate-fade">
               <h1 className="hero-title mb-3">Trouvez votre<br />emploi idéal au<br /><span>Cameroun</span> 🇨🇲</h1>
               <p className="hero-subtitle mb-4 animate-fade-2">La plateforme de recrutement #1 en Afrique centrale.<br />Des milliers d&apos;offres vérifiées vous attendent.</p>
 
@@ -171,6 +179,34 @@ export default async function AccueilPage() {
                 <div className="hero-stat"><div className="hs-number">{stats.offres}+</div><div className="hs-label">Offres actives</div></div>
                 <div className="hero-stat"><div className="hs-number">{stats.entreprises}+</div><div className="hs-label">Entreprises</div></div>
                 <div className="hero-stat"><div className="hs-number">{stats.candidats}+</div><div className="hs-label">Candidats</div></div>
+              </div>
+            </div>
+
+            {/* Hero Image - visible desktop */}
+            <div className="col-lg-6 hero-visual animate-fade-2">
+              <div className="hero-img-card">
+                <Image
+                  src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?q=80&w=800&auto=format&fit=crop"
+                  alt="Équipe professionnelle au Cameroun"
+                  width={600}
+                  height={400}
+                  priority
+                  style={{ width: "100%", height: "auto", objectFit: "cover" }}
+                />
+              </div>
+              <div className="hero-float hero-float-1">
+                <div style={{ width: 44, height: 44, background: "#ECFDF5", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}><i className="bi bi-check-circle-fill" style={{ color: "#059669", fontSize: "1.25rem" }}></i></div>
+                <div>
+                  <div style={{ fontSize: ".85rem", fontWeight: 700, color: "#0F172A" }}>+2,500 recrutements</div>
+                  <div style={{ fontSize: ".75rem", color: "#64748B" }}>ce mois-ci</div>
+                </div>
+              </div>
+              <div className="hero-float hero-float-2">
+                <Image src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=100&auto=format&fit=crop" alt="avatar" width={40} height={40} style={{ borderRadius: "50%" }} />
+                <div>
+                  <div style={{ fontSize: ".8rem", fontWeight: 700 }}>Sarah M.</div>
+                  <div style={{ fontSize: ".7rem", color: "#059669" }}>● En poste chez MTN</div>
+                </div>
               </div>
             </div>
           </div>
@@ -231,7 +267,13 @@ export default async function AccueilPage() {
               <div key={o.id} className="col-lg-4 col-md-6">
                 <Link href={`/offres/${o.id}`} className="offre-card" aria-label={`Voir offre ${o.titre}`}>
                   <div className="d-flex align-items-start gap-3 mb-3">
-                    <div className="offre-logo" aria-hidden>{(o.entreprise?.nom || "E").slice(0, 2).toUpperCase()}</div>
+                    <Image
+                      src={`https://ui-avatars.com/api/?name=${encodeURIComponent(o.entreprise?.nom || "Entreprise")}&background=EFF6FF&color=0066FF&size=92&bold=true`}
+                      alt={o.entreprise?.nom || "Entreprise"}
+                      width={46}
+                      height={46}
+                      style={{ borderRadius: 10, flexShrink: 0 }}
+                    />
                     <div className="flex-grow-1 min-w-0">
                       <div className="offre-titre text-truncate">{o.titre}</div>
                       <div className="offre-entreprise">{o.entreprise?.nom || "Entreprise"}</div>
@@ -253,6 +295,21 @@ export default async function AccueilPage() {
 
           <div className="text-center mt-4 d-md-none">
             <Link href="/offres" className="btn btn-outline-primary rounded-pill px-4">Voir toutes les offres</Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ENTREPRISES PARTENAIRES */}
+      <section style={{ padding: "2.5rem 0", background: "#fff", borderTop: "1px solid #F1F5F9", borderBottom: "1px solid #F1F5F9" }}>
+        <div className="container">
+          <p className="text-center small fw-semibold text-muted mb-3" style={{ letterSpacing: ".1em" }}>ILS NOUS FONT CONFIANCE</p>
+          <div className="d-flex flex-wrap justify-content-center align-items-center gap-4 gap-lg-5 opacity-75">
+            {["MTN", "Orange", "TotalEnergies", "SABC", "Ecobank", "Dangote"].map((name) => (
+              <div key={name} className="d-flex align-items-center gap-2" style={{ filter: "grayscale(1)", opacity: .7 }}>
+                <div style={{ width: 36, height: 36, background: "#F8FAFF", border: "1px solid #E2E8F0", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: ".7rem", fontWeight: 800, color: "#0066FF" }}>{name.slice(0, 2)}</div>
+                <span style={{ fontWeight: 700, color: "#0F172A", fontSize: ".9rem" }}>{name}</span>
+              </div>
+            ))}
           </div>
         </div>
       </section>
