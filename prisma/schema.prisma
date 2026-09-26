@@ -1,0 +1,373 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// UTILISATEURS & AUTH
+// ---------------------------------------------------------------------------
+
+model User {
+  id                Int            @id @default(autoincrement())
+  name              String         @db.VarChar(100)
+  email             String?        @unique @db.VarChar(150)
+  password          String?        @db.VarChar(255)
+  role              Role
+  avatar            String?        @db.VarChar(255)
+  phone             String?        @unique @db.VarChar(20)
+  ville             String?        @db.VarChar(100)
+  pays              String         @default("Cameroun") @db.VarChar(100)
+  isActive          Boolean        @default(true) @map("is_active")
+  emailVerifiedAt   DateTime?      @map("email_verified_at")
+  rememberToken     String?        @map("remember_token")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  candidat          Candidat?
+  entreprise        Entreprise?
+  messages          Message[]
+  notifications     Notification[]
+  offresSauvegardees OffreSauvegardee[]
+
+  @@map("users")
+}
+
+enum Role {
+  candidat
+  recruteur
+  admin
+
+  @@map("users_role")
+}
+
+// ---------------------------------------------------------------------------
+// CANDIDATS, EXPÉRIENCES & FORMATIONS
+// ---------------------------------------------------------------------------
+
+model Candidat {
+  id             Int                     @id @default(autoincrement())
+  userId         Int                     @unique @map("user_id")
+  titreProfil    String?                 @map("titre_profil") @db.VarChar(150)
+  resume         String?                 @db.Text
+  cvPath         String?                 @map("cv_path")
+  dateNaissance  DateTime?               @map("date_naissance") @db.Date
+  genre          Genre?
+  disponibilite  Disponibilite           @default(immediat)
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competences    CandidatCompetence[]
+  candidatures   Candidature[]
+  conversations  Conversation[]
+  experiences    Experience[]
+  formations     Formation[]
+
+  @@map("candidats")
+}
+
+enum Genre {
+  homme
+  femme
+  autre
+
+  @@map("candidats_genre")
+}
+
+enum Disponibilite {
+  immediat
+  un_mois        @map("1_mois")
+  trois_mois     @map("3_mois")
+  non_disponible
+
+  @@map("candidats_disponibilite")
+}
+
+model Experience {
+  id          Int       @id @default(autoincrement())
+  candidatId  Int       @map("candidat_id")
+  poste       String    @db.VarChar(150)
+  entreprise  String    @db.VarChar(150)
+  ville       String?   @db.VarChar(100)
+  dateDebut   DateTime  @map("date_debut") @db.Date
+  dateFin     DateTime? @map("date_fin") @db.Date
+  description String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  candidat    Candidat  @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+
+  @@index([candidatId], map: "experiences_candidat_id_fkey")
+  @@map("experiences")
+}
+
+model Formation {
+  id            Int       @id @default(autoincrement())
+  candidatId    Int       @map("candidat_id")
+  diplome       String    @db.VarChar(150)
+  etablissement String    @db.VarChar(150)
+  ville         String?   @db.VarChar(100)
+  dateDebut     DateTime  @map("date_debut") @db.Date
+  dateFin       DateTime? @map("date_fin") @db.Date
+  description   String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  candidat      Candidat  @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+
+  @@index([candidatId], map: "formations_candidat_id_fkey")
+  @@map("formations")
+}
+
+// ---------------------------------------------------------------------------
+// ENTREPRISES & RECRUTEURS
+// ---------------------------------------------------------------------------
+
+model Entreprise {
+  id                Int             @id @default(autoincrement())
+  userId            Int             @unique @map("user_id")
+  nom               String          @db.VarChar(150)
+  description       String?         @db.Text
+  secteurActivite   String?         @map("secteur_activite") @db.VarChar(150)
+  tailleEntreprise  String?         @map("taille_entreprise") @db.VarChar(20)
+  siteWeb           String?         @map("site_web")
+  emailContact      String?         @map("email_contact")
+  telephone         String?
+  adresse           String?
+  logo              String?
+  ville             String?         @db.VarChar(100)
+  pays              String          @default("Cameroun") @db.VarChar(100)
+  isVerified        Boolean         @default(false) @map("is_verified")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offres            Offre[]
+  conversations     Conversation[]
+
+  @@map("entreprises")
+}
+
+// ---------------------------------------------------------------------------
+// CATÉGORIES & COMPÉTENCES
+// ---------------------------------------------------------------------------
+
+model Categorie {
+  id         Int      @id @default(autoincrement())
+  nom        String   @unique @db.VarChar(100)
+  icone      String?  @db.VarChar(50)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  offres     Offre[]
+
+  @@map("categories")
+}
+
+model Competence {
+  id          Int                  @id @default(autoincrement())
+  nom         String               @unique @db.VarChar(100)
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  candidats   CandidatCompetence[]
+  offres      OffreCompetence[]
+
+  @@map("competences")
+}
+
+model CandidatCompetence {
+  candidatId   Int              @map("candidat_id")
+  competenceId Int              @map("competence_id")
+  niveau       NiveauCompetence @default(intermediaire)
+
+  candidat     Candidat         @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  competence   Competence       @relation(fields: [competenceId], references: [id], onDelete: Cascade)
+
+  @@id([candidatId, competenceId])
+  @@index([competenceId], map: "candidat_competences_competence_id_fkey")
+  @@map("candidat_competences")
+}
+
+enum NiveauCompetence {
+  debutant
+  intermediaire
+  avance
+
+  @@map("candidat_competences_niveau")
+}
+
+model OffreCompetence {
+  offreId      Int        @map("offre_id")
+  competenceId Int        @map("competence_id")
+
+  offre        Offre      @relation(fields: [offreId], references: [id], onDelete: Cascade)
+  competence   Competence @relation(fields: [competenceId], references: [id], onDelete: Cascade)
+
+  @@id([offreId, competenceId])
+  @@index([competenceId], map: "offre_competences_competence_id_fkey")
+  @@map("offre_competences")
+}
+
+// ---------------------------------------------------------------------------
+// OFFRES D'EMPLOI & CANDIDATURES
+// ---------------------------------------------------------------------------
+
+model Offre {
+  id                Int               @id @default(autoincrement())
+  entrepriseId      Int               @map("entreprise_id")
+  categorieId       Int               @map("categorie_id")
+  titre             String            @db.VarChar(200)
+  description       String            @db.LongText
+  typeContrat       TypeContrat       @map("type_contrat")
+  niveauExperience  NiveauExperience  @map("niveau_experience")
+  ville             String            @db.VarChar(100)
+  pays              String            @default("Cameroun") @db.VarChar(100)
+  salaireMin        Decimal?          @map("salaire_min") @db.Decimal(10, 2)
+  salaireMax        Decimal?          @map("salaire_max") @db.Decimal(10, 2)
+  salaireVisible    Boolean           @default(false) @map("salaire_visible")
+  dateExpiration    DateTime          @map("date_expiration") @db.Date
+  isActive          Boolean           @default(true) @map("is_active")
+  vues              Int               @default(0) @db.UnsignedInt
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  entreprise        Entreprise        @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
+  categorie         Categorie         @relation(fields: [categorieId], references: [id], onDelete: Restrict)
+  candidatures      Candidature[]
+  conversations     Conversation[]
+  competences       OffreCompetence[]
+  savedByUsers      OffreSauvegardee[]
+
+  @@index([categorieId], map: "offres_categorie_id_fkey")
+  @@index([entrepriseId], map: "offres_entreprise_id_fkey")
+  @@map("offres")
+}
+
+// Table pivot explicite (timestamps Laravel, PK composite).
+// Remplace le M-N implicite Prisma pour rester fidele a offres_sauvegardees.
+model OffreSauvegardee {
+  userId    Int      @map("user_id")
+  offreId   Int      @map("offre_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offre Offre @relation(fields: [offreId], references: [id], onDelete: Cascade)
+
+  @@id([userId, offreId])
+  @@index([offreId], map: "offres_sauvegardees_offre_id_fkey")
+  @@map("offres_sauvegardees")
+}
+
+enum TypeContrat {
+  CDI
+  CDD
+  stage
+  freelance
+  temps_partiel
+
+  @@map("offres_type_contrat")
+}
+
+enum NiveauExperience {
+  sans_experience
+  junior
+  intermediaire
+  senior
+
+  @@map("offres_niveau_experience")
+}
+
+model Candidature {
+  id               Int               @id @default(autoincrement())
+  offreId          Int               @map("offre_id")
+  candidatId       Int               @map("candidat_id")
+  lettreMotivation String?           @map("lettre_motivation") @db.Text
+  cvPath           String?           @map("cv_path")
+  statut           StatutCandidature @default(envoyee)
+  noteRecruteur    String?           @map("note_recruteur") @db.Text
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  offre            Offre             @relation(fields: [offreId], references: [id], onDelete: Cascade)
+  candidat         Candidat          @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+
+  @@unique([offreId, candidatId])
+  @@index([candidatId], map: "candidatures_candidat_id_fkey")
+  @@map("candidatures")
+}
+
+enum StatutCandidature {
+  envoyee
+  vue
+  retenue
+  refusee
+  entretien
+
+  @@map("candidatures_statut")
+}
+
+// ---------------------------------------------------------------------------
+// MESSAGERIE & NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id           Int         @id @default(autoincrement())
+  candidatId   Int         @map("candidat_id")
+  recruteurId  Int         @map("recruteur_id")
+  offreId      Int?        @map("offre_id")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  candidat     Candidat    @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  entreprise   Entreprise  @relation(fields: [recruteurId], references: [id], onDelete: Cascade)
+  offre        Offre?      @relation(fields: [offreId], references: [id], onDelete: SetNull)
+  messages     Message[]
+
+  // Note MySQL : UNIQUE avec offre_id NULL n'empeche pas les doublons
+  // (NULL != NULL). Dedoublonnage a appliquer au niveau applicatif (M8).
+  @@unique([candidatId, recruteurId, offreId])
+  @@index([candidatId], map: "conversations_candidat_id_fkey")
+  @@index([offreId], map: "conversations_offre_id_fkey")
+  @@index([recruteurId], map: "conversations_recruteur_id_fkey")
+  @@map("conversations")
+}
+
+model Message {
+  id              Int          @id @default(autoincrement())
+  conversationId  Int          @map("conversation_id")
+  senderId        Int          @map("sender_id")
+  contenu         String       @db.Text
+  isLu            Boolean      @default(false) @map("is_lu")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "messages_conversation_id_fkey")
+  @@index([senderId], map: "messages_sender_id_fkey")
+  @@map("messages")
+}
+
+model Notification {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  type       String   @db.VarChar(100)
+  titre      String   @db.VarChar(200)
+  contenu    String?  @db.Text
+  isLu       Boolean  @default(false) @map("is_lu")
+  lien       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "notifications_user_id_fkey")
+  @@map("notifications")
+}
