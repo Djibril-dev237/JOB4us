@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# sources PHP legacy (reference locale pour la migration, hors repository)
+/legacy_laravel/
+
+# utilitaires temporaires de migration
+/scripts/_tmp_*
