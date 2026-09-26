@@ -7,6 +7,13 @@ import bcrypt from 'bcryptjs'
 
 import { prisma } from '@/lib/prisma'
 import { LoginSchema } from '@/lib/definitions'
+import {
+  LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER,
+  LOGIN_WINDOW_MS,
+  checkRateLimit,
+  recordAttempt,
+  resetAttempts,
+} from '@/lib/rate-limit'
 
 // ─── Migration des hash PHP (password_hash, bcrypt $2y$) ─────────────────────
 
@@ -83,6 +90,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const { identifier, password } = parsed.data
 
+        // Rate limiting PAR IDENTIFIANT placé ici et non dans l'action :
+        // authorize() est le point de passage unique de tout essai
+        // credentials (formulaire OU POST direct sur
+        // /api/auth/callback/credentials), impossible à contourner.
+        // (La limite par IP, elle, nécessite les headers : côté action.)
+        const idKey = `login:id:${identifier.toLowerCase()}`
+        const idLimit = checkRateLimit(idKey, LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER, LOGIN_WINDOW_MS)
+        if (!idLimit.allowed) return null
+
         // Login par email OU téléphone (compatible legacy PHP).
         // MySQL : collation utf8mb4_unicode_ci, comparaison insensible
         // à la casse pour l'email.
@@ -98,14 +114,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
         })
 
-        // Compte absent ou désactivé : comparaison factice, réponse nulle.
+        // Compte absent ou désactivé : comparaison factice, réponse nulle,
+        // tentative comptée (comportement identique à un mauvais mot de
+        // passe : aucune fuite sur l'existence du compte).
         if (!user || !user.isActive) {
           await verifyPassword(password, null)
+          recordAttempt(idKey)
           return null
         }
 
         const valid = await verifyPassword(password, user.password)
-        if (!valid) return null
+        if (!valid) {
+          recordAttempt(idKey)
+          return null
+        }
+
+        // Connexion réussie : fenêtre de cet identifiant libérée.
+        resetAttempts(idKey)
 
         // Aucun hash de mot de passe n'est retourné ni journalisé :
         // seuls les champs non sensibles alimentent la session.

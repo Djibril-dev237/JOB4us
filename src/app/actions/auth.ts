@@ -24,7 +24,6 @@ import {
   LOGIN_WINDOW_MS,
   checkRateLimit,
   recordAttempt,
-  resetAttempts,
 } from '@/lib/rate-limit'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -66,6 +65,9 @@ export async function login(
   const idKey = `login:id:${identifier.toLowerCase()}`
   const ipKey = `login:ip:${await clientIp()}`
 
+  // Vérification préalable pour un message d'erreur utile ; le comptage et
+  // le blocage FORTS sont dans authorize() (src/auth.ts) : ils s'appliquent
+  // aussi aux POST directs sur /api/auth/callback/credentials.
   const idLimit = checkRateLimit(idKey, LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER, LOGIN_WINDOW_MS)
   const ipLimit = checkRateLimit(ipKey, LOGIN_MAX_ATTEMPTS_PER_IP, LOGIN_WINDOW_MS)
   if (!idLimit.allowed || !ipLimit.allowed) {
@@ -86,16 +88,15 @@ export async function login(
     // lève cette erreur proprement ; les autres AuthError sont des erreurs
     // de configuration et remontent telles quelles, sans information à
     // l'utilisateur).
+    // Le comptage par identifiant est déjà fait dans authorize() : ici on
+    // ne compte que l'IP.
     if (error instanceof CredentialsSignin) {
-      recordAttempt(idKey)
       recordAttempt(ipKey)
       return { message: 'Email ou mot de passe incorrect.' }
     }
     throw error
   }
 
-  // Connexion réussie : on libère la fenêtre propre à cet identifiant.
-  resetAttempts(idKey)
   redirect('/')
 }
 
