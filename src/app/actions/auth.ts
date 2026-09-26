@@ -1,6 +1,5 @@
 'use server'
 
-import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { Prisma } from '@prisma/client'
 import { headers } from 'next/headers'
@@ -18,6 +17,7 @@ import {
   type RegisterFormData,
   type RegisterRole,
 } from '@/lib/definitions'
+import { formDataString, issuesToErrors } from '@/lib/form-errors'
 import {
   LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER,
   LOGIN_MAX_ATTEMPTS_PER_IP,
@@ -28,23 +28,6 @@ import {
 } from '@/lib/rate-limit'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Extrait une chaîne du FormData (les fichiers deviennent ''). */
-function str(value: FormDataEntryValue | null): string {
-  return typeof value === 'string' ? value : ''
-}
-
-/** Regroupe les issues Zod par champ (clé du premier segment du path). */
-function issuesToErrors(error: z.ZodError): Partial<Record<string, string[]>> {
-  const errors: Partial<Record<string, string[]>> = {}
-  for (const issue of error.issues) {
-    const key = typeof issue.path[0] === 'string' ? issue.path[0] : '_form'
-    const list = errors[key] ?? []
-    list.push(issue.message)
-    errors[key] = list
-  }
-  return errors
-}
 
 /** Adresse IP du client (derrière le proxy Next / reverse proxy). */
 async function clientIp(): Promise<string> {
@@ -147,12 +130,14 @@ export async function register(
   const role: RegisterRole = roleInput
 
   const raw: Record<string, string> = {
-    name: str(formData.get('name')),
-    email: str(formData.get('email')),
-    phone: str(formData.get('phone')),
-    password: str(formData.get('password')),
-    confirmPassword: str(formData.get('confirmPassword')),
-    ...(role === 'recruteur' ? { entrepriseName: str(formData.get('entrepriseName')) } : {}),
+    name: formDataString(formData.get('name')),
+    email: formDataString(formData.get('email')),
+    phone: formDataString(formData.get('phone')),
+    password: formDataString(formData.get('password')),
+    confirmPassword: formDataString(formData.get('confirmPassword')),
+    ...(role === 'recruteur'
+      ? { entrepriseName: formDataString(formData.get('entrepriseName')) }
+      : {}),
   }
 
   const parsed =
