@@ -2,7 +2,8 @@ import type { ButtonHTMLAttributes } from 'react'
 
 // ─── Bouton ──────────────────────────────────────────────────────────────────
 // États : focus-visible (anneau global globals.css), hover (couleur), disabled
-// (opacité + pointer-events coupés). Rayon système 4px, jamais de pilule.
+// (opacité + pointer-events coupés). Rayon système 8px (token --radius-sm),
+// jamais de pilule — réf. boutons PHP (radius 9px, graisse 500, .875rem).
 // Les liens stylés en bouton réutilisent buttonClassName().
 // ---------------------------------------------------------------------------
 

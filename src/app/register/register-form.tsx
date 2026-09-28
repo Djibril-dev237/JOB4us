@@ -53,7 +53,7 @@ export function RegisterForm() {
                   className="sr-only"
                 />
                 <span
-                  className={`block font-medium ${role === option.value ? 'text-brand' : 'text-ink'}`}
+                  className={`block font-medium ${role === option.value ? 'text-brand-dark' : 'text-ink'}`}
                 >
                   {option.label}
                 </span>
