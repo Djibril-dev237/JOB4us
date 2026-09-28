@@ -6,11 +6,12 @@ import type { Role } from '@/lib/definitions'
 // plan de migration — les pages non encore migrées répondent 404 jusqu'à
 // leur module, mais l'arborescence est celle de la cible.
 //
-// Deux niveaux :
-// - NAV_PRIMARY   : barre du header (desktop), cœur du parcours, 4 items max
-//                   pour tenir à partir de 1024px ;
-// - NAV_SECONDARY : menu profil (desktop) + menu mobile. Avec PRIMARY, la
-//                   navigation complète reste atteignable partout.
+// Trois jeux :
+// - PUBLIC_NAV    : visiteur, liens centrés du header + section sans titre
+//                   du tiroir mobile ;
+// - SIDEBAR_NAV   : shell connecté — sidebar desktop 264px ET tiroir mobile,
+//                   sections identiques aux sidebars PHP ;
+// - NAV_SECONDARY : menu profil desktop (AvatarMenu).
 // ---------------------------------------------------------------------------
 
 export interface NavItem {
@@ -24,27 +25,6 @@ export const PUBLIC_NAV: NavItem[] = [
   // Catégories et « Comment ça marche » rejoindront cette liste avec la
   // page d'accueil (ancres legacy #categories / #comment).
 ]
-
-export const NAV_PRIMARY: Record<Role, NavItem[]> = {
-  candidat: [
-    { label: 'Tableau de bord', href: '/candidat/dashboard' },
-    { label: "Offres d'emploi", href: '/offres' },
-    { label: 'Mes candidatures', href: '/candidat/candidatures' },
-    { label: 'Messages', href: '/messages' },
-  ],
-  recruteur: [
-    { label: 'Tableau de bord', href: '/recruteur/dashboard' },
-    { label: 'Mes offres', href: '/recruteur/offres' },
-    { label: 'Candidatures reçues', href: '/recruteur/candidatures' },
-    { label: 'Recherche candidats', href: '/recruteur/candidats' },
-  ],
-  admin: [
-    { label: 'Tableau de bord', href: '/admin/dashboard' },
-    { label: 'Utilisateurs', href: '/admin/utilisateurs' },
-    { label: "Offres d'emploi", href: '/admin/offres' },
-    { label: 'Entreprises', href: '/admin/entreprises' },
-  ],
-}
 
 export const NAV_SECONDARY: Record<Role, NavItem[]> = {
   candidat: [

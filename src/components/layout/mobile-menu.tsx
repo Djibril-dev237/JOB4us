@@ -8,8 +8,9 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { logout } from '@/app/actions/auth'
 import { IconClose, IconLogout, IconMenu } from '@/components/icons'
 import type { Role } from '@/lib/definitions'
+import { initials } from './avatar-menu'
 import { Logo } from './logo'
-import { ROLE_LABEL, isActiveLink, type NavItem } from './nav'
+import { ROLE_LABEL, isActiveLink, type NavItem, type SidebarSection } from './nav'
 
 // ─── Menu mobile (tiroir) ────────────────────────────────────────────────────
 // Exigences M2 :
@@ -21,6 +22,11 @@ import { ROLE_LABEL, isActiveLink, type NavItem } from './nav'
 // - animation 200ms (token duration-base), neutralisée par prefers-reduced-motion.
 // La cause du bug mobile legacy (sidebar fixe sans breakpoint) n'existe pas
 // ici : ce composant est la navigation mobile, pas un retrait de desktop.
+//
+// Contenu : IDENTIQUE à la sidebar desktop (profil + sections SIDEBAR_NAV +
+// déconnexion) pour les connectés, navigation publique + CTAs pour le
+// visiteur — les sections descendent du Header (serveur), aucune session à
+// relire côté client.
 // ---------------------------------------------------------------------------
 
 const FOCUSABLE =
@@ -29,26 +35,13 @@ const FOCUSABLE =
 const EASE_STANDARD: [number, number, number, number] = [0.2, 0, 0, 1]
 
 interface MobileMenuProps {
-  /** Navigation primaire du rôle (ou navigation publique). */
-  primary: NavItem[]
-  /** Navigation secondaire du rôle (vide pour le visiteur). */
-  secondary: NavItem[]
+  /** Sections de navigation (SIDEBAR_NAV du rôle, ou publique en section vide). */
+  sections: SidebarSection[]
   /** Utilisateur connecté, ou null pour le visiteur. */
   user: { name: string; role: Role } | null
 }
 
-/** Initiales pour l'avatar (1 ou 2 caractères). */
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
-
-export function MobileMenu({ primary, secondary, user }: MobileMenuProps) {
+export function MobileMenu({ sections, user }: MobileMenuProps) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
   const reducedMotion = useReducedMotion()
@@ -139,31 +132,38 @@ export function MobileMenu({ primary, secondary, user }: MobileMenuProps) {
       </button>
 
       <AnimatePresence>
+        {/* Enfants motion DIRECTS d'AnimatePresence, avec clés uniques : c'est
+            le contrat documenté de la librairie (un wrapper <div> neutre comme
+            enfant direct n'est pas supporté). L'overlay et le panneau sont
+            positionnés en `fixed` (plus besoin de conteneur relatif), gate
+            `lg:hidden` identique à l'ancien wrapper. */}
         {open && (
-          <div className="fixed inset-0 z-50 lg:hidden">
-            {/* Fond assombri : clique pour fermer */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="absolute inset-0 bg-ink/40"
-              onClick={() => setOpen(false)}
-              aria-hidden="true"
-            />
+          <motion.div
+            key="drawer-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-50 bg-ink/40 lg:hidden"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+        )}
 
-            <motion.div
-              ref={panelRef}
-              id={menuId}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Menu de navigation"
-              tabIndex={-1}
-              onKeyDown={trapFocus}
-              {...slide}
-              transition={{ duration: reducedMotion ? 0 : 0.2, ease: EASE_STANDARD }}
-              className="absolute inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col bg-surface shadow-lift focus:outline-none"
-            >
+        {open && (
+          <motion.div
+            key="drawer-panel"
+            ref={panelRef}
+            id={menuId}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu de navigation"
+            tabIndex={-1}
+            onKeyDown={trapFocus}
+            {...slide}
+            transition={{ duration: reducedMotion ? 0 : 0.2, ease: EASE_STANDARD }}
+            className="fixed inset-y-0 left-0 z-50 flex w-80 max-w-[85vw] flex-col bg-surface shadow-lift focus:outline-none lg:hidden"
+          >
               {/* En-tête du tiroir */}
               <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
                 <Logo />
@@ -177,87 +177,87 @@ export function MobileMenu({ primary, secondary, user }: MobileMenuProps) {
                 </button>
               </div>
 
-              {/* Navigation */}
-              <nav aria-label="Navigation principale" className="flex-1 overflow-y-auto px-3 py-4">
-                <ul className="space-y-1">
-                  {primary.map((item) => (
-                    <li key={item.href}>
-                      <MobileNavLink item={item} pathname={pathname} />
-                    </li>
-                  ))}
-                </ul>
+              {/* Profil (connecté) : identique à la sidebar desktop */}
+              {user && (
+                <div className="flex items-center gap-3 border-b border-line px-4 py-3">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-10 shrink-0 items-center justify-center rounded-sm bg-brand-tint text-sm font-semibold text-brand-dark"
+                  >
+                    {initials(user.name)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{user.name}</p>
+                    <p className="truncate text-2xs text-ink-muted">
+                      {ROLE_LABEL[user.role]}
+                    </p>
+                  </div>
+                </div>
+              )}
 
-                {secondary.length > 0 && (
-                  <>
-                    <hr className="my-4 border-line" />
-                    <ul className="space-y-1">
-                      {secondary.map((item) => (
+              {/* Sections : identiques à la sidebar (SIDEBAR_NAV du rôle) */}
+              <nav
+                aria-label="Navigation principale"
+                className="flex-1 space-y-5 overflow-y-auto px-3 py-4"
+              >
+                {sections.map((section) => (
+                  <div key={section.title || 'public'}>
+                    {section.title && (
+                      <h2 className="px-3 text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+                        {section.title}
+                      </h2>
+                    )}
+                    <ul className="mt-1 space-y-0.5">
+                      {section.items.map((item) => (
                         <li key={item.href}>
                           <MobileNavLink item={item} pathname={pathname} />
                         </li>
                       ))}
                     </ul>
-                  </>
-                )}
+                  </div>
+                ))}
               </nav>
 
               {/* Actions de bas de tiroir */}
               <div className="border-t border-line px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
                 {user ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <span
-                        aria-hidden="true"
-                        className="flex size-9 items-center justify-center rounded-full bg-brand-tint text-sm font-semibold text-brand"
-                      >
-                        {initials(user.name)}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-ink">{user.name}</p>
-                        <span className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">
-                          {ROLE_LABEL[user.role]}
-                        </span>
-                      </div>
-                    </div>
-                    <form action={logout}>
-                      <button
-                        type="submit"
-                        onClick={close}
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-sm border border-line-strong text-sm font-medium text-danger transition-colors duration-fast hover:bg-danger-tint"
-                      >
-                        <IconLogout size={16} />
-                        Se déconnecter
-                      </button>
-                    </form>
-                  </div>
+                  <form action={logout}>
+                    <button
+                      type="submit"
+                      onClick={close}
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-sm border border-line-strong text-sm font-medium text-danger transition-colors duration-fast hover:bg-danger-tint"
+                    >
+                      <IconLogout size={16} />
+                      Se déconnecter
+                    </button>
+                  </form>
                 ) : (
                   <div className="space-y-2">
                     <Link
                       href="/login"
                       onClick={close}
-                      className="flex h-11 items-center justify-center rounded-sm bg-brand text-sm font-medium text-white transition-colors duration-fast hover:bg-brand-dark"
+                      className="flex h-11 items-center justify-center rounded-sm border border-brand text-sm font-medium text-brand transition-colors duration-fast hover:bg-brand-tint"
                     >
                       Connexion
                     </Link>
                     <Link
                       href="/register"
                       onClick={close}
-                      className="flex h-11 items-center justify-center rounded-sm border border-line-strong text-sm font-medium text-ink transition-colors duration-fast hover:bg-surface-alt"
+                      className="flex h-11 items-center justify-center rounded-sm bg-brand text-sm font-medium text-white transition-colors duration-fast hover:bg-brand-dark"
                     >
                       Créer un compte
                     </Link>
                   </div>
                 )}
               </div>
-            </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </>
   )
 }
 
-/** Lien du tiroir : filet actif 3px à gauche (signature direction B). */
+/** Lien du tiroir : filet actif 3px à gauche (parité sidebar desktop). */
 function MobileNavLink({ item, pathname }: { item: NavItem; pathname: string }) {
   const active = isActiveLink(pathname, item.href)
   return (
@@ -266,7 +266,7 @@ function MobileNavLink({ item, pathname }: { item: NavItem; pathname: string }) 
       aria-current={active ? 'page' : undefined}
       className={`flex min-h-11 items-center rounded-sm border-l-[3px] px-3 text-sm transition-colors duration-fast ${
         active
-          ? 'border-brand bg-brand-tint font-medium text-brand'
+          ? 'border-brand bg-brand-tint font-medium text-brand-dark'
           : 'border-transparent text-ink hover:bg-surface-alt'
       }`}
     >

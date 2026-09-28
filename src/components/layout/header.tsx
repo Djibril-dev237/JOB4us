@@ -7,7 +7,7 @@ import { AvatarMenu } from './avatar-menu'
 import { Logo } from './logo'
 import { MobileMenu } from './mobile-menu'
 import { NavLinks } from './nav-links'
-import { NAV_PRIMARY, NAV_SECONDARY, PUBLIC_NAV } from './nav'
+import { NAV_SECONDARY, PUBLIC_NAV, SIDEBAR_NAV } from './nav'
 import { SearchForm } from './search-form'
 
 // ─── Header global ───────────────────────────────────────────────────────────
@@ -39,7 +39,12 @@ export async function Header() {
     ? await prisma.notification.count({ where: { userId, isLu: false } })
     : 0
 
-  const primary = isAuthed ? NAV_PRIMARY[role] : PUBLIC_NAV
+  // Sections de la sidebar/tiroir (SIDEBAR_NAV du rôle ; section sans titre
+  // pour le visiteur = liste publique à plat).
+  const sections =
+    isAuthed && role
+      ? SIDEBAR_NAV[role]
+      : [{ title: '', items: PUBLIC_NAV }]
   const secondary = isAuthed ? NAV_SECONDARY[role] : []
 
   const name = session?.user?.name ?? 'Mon compte'
@@ -52,7 +57,7 @@ export async function Header() {
 
         {!isAuthed && (
           <div className="hidden flex-1 justify-center lg:flex">
-            <NavLinks items={primary} />
+            <NavLinks items={PUBLIC_NAV} />
           </div>
         )}
 
@@ -102,8 +107,7 @@ export async function Header() {
           )}
 
           <MobileMenu
-            primary={primary}
-            secondary={secondary}
+            sections={sections}
             user={isAuthed && role ? { name, role } : null}
           />
         </div>
