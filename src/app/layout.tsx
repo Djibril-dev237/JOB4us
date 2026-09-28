@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 
-import { Footer } from "@/components/layout/footer";
 import { Header } from "@/components/layout/header";
 import "./globals.css";
 
@@ -20,6 +19,17 @@ export const metadata: Metadata = {
     "Job4Us met en relation les candidats et les recruteurs au Cameroun : recherche d'offres d'emploi, candidatures, publication d'offres et suivi du recrutement.",
 };
 
+// ─── Layout racine ───────────────────────────────────────────────────────────
+// html/body + Header + shells des route groups (site) et (app).
+//
+// RÈGLE DE SUSPENSION (bug upstream vercel/next.js#98097, repro M2 v2) :
+// loading.tsx ne s'applique qu'aux ENFANTS de ce layout. Le Header (async :
+// session Auth.js + compteur de notifications) doit rester ICI, au-dessus de
+// la boundary — déplacé sous loading.tsx, l'hydratation du sous-arbre est
+// perdue (squelette resté en place, bandeau client absent, console propre).
+// Donc : toute suspension async vit dans ce layout ; layouts de groupes et
+// pages restent strictement synchrones (identité descendant via props).
+// ---------------------------------------------------------------------------
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="fr" className={`${inter.variable} h-full antialiased`}>
@@ -34,11 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 
         <Header />
 
-        <main id="contenu" className="flex-1">
-          {children}
-        </main>
-
-        <Footer />
+        {children}
       </body>
     </html>
   );
