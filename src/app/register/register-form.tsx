@@ -4,6 +4,9 @@ import { useActionState, useState } from 'react'
 import Link from 'next/link'
 
 import { register } from '@/app/actions/auth'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import type { RegisterRole } from '@/lib/definitions'
 
 const ROLE_OPTIONS: { value: RegisterRole; label: string; description: string }[] = [
@@ -16,29 +19,29 @@ export function RegisterForm() {
   const [role, setRole] = useState<RegisterRole>('candidat')
 
   return (
-    <div className="w-full max-w-sm">
-      <h1 className="text-xl font-semibold text-zinc-900">Créer un compte</h1>
+    <Card className="w-full max-w-sm p-6">
+      <h1 className="text-xl font-bold tracking-tight text-ink">Créer un compte</h1>
 
       <form action={formAction} className="mt-6 space-y-4">
         {state?.errors?._form?.[0] && (
           <p
             role="alert"
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            className="rounded-sm border border-danger bg-danger-tint px-3 py-2 text-sm text-danger"
           >
             {state.errors._form[0]}
           </p>
         )}
 
         <fieldset>
-          <legend className="text-sm font-medium text-zinc-700">Je suis un</legend>
+          <legend className="text-sm font-medium text-ink">Je suis un</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {ROLE_OPTIONS.map((option) => (
               <label
                 key={option.value}
-                className={`cursor-pointer rounded-md border px-3 py-2 text-sm ${
+                className={`cursor-pointer rounded-sm border px-3 py-2 text-sm transition-colors duration-fast ${
                   role === option.value
-                    ? 'border-zinc-900 bg-zinc-50'
-                    : 'border-zinc-300'
+                    ? 'border-brand bg-brand-tint'
+                    : 'border-line-strong bg-surface hover:bg-surface-alt'
                 }`}
               >
                 <input
@@ -49,137 +52,95 @@ export function RegisterForm() {
                   onChange={() => setRole(option.value)}
                   className="sr-only"
                 />
-                <span className="block font-medium text-zinc-900">{option.label}</span>
-                <span className="block text-xs text-zinc-600">{option.description}</span>
+                <span
+                  className={`block font-medium ${role === option.value ? 'text-brand' : 'text-ink'}`}
+                >
+                  {option.label}
+                </span>
+                <span className="block text-xs text-ink-muted">{option.description}</span>
               </label>
             ))}
           </div>
         </fieldset>
 
-        <div>
-          <label htmlFor="name" className="block text-sm font-medium text-zinc-700">
-            Nom complet
-          </label>
-          <input
-            id="name"
-            name="name"
-            type="text"
-            autoComplete="name"
-            required
-            minLength={2}
-            maxLength={100}
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.name?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.name[0]}</p>
-          )}
-        </div>
+        <Input
+          id="name"
+          name="name"
+          type="text"
+          label="Nom complet"
+          autoComplete="name"
+          required
+          minLength={2}
+          maxLength={100}
+          error={state?.errors?.name?.[0]}
+        />
 
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-zinc-700">
-            Email
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.email?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.email[0]}</p>
-          )}
-        </div>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          label="Email"
+          autoComplete="email"
+          required
+          error={state?.errors?.email?.[0]}
+        />
 
-        <div>
-          <label htmlFor="phone" className="block text-sm font-medium text-zinc-700">
-            Téléphone (optionnel)
-          </label>
-          <input
-            id="phone"
-            name="phone"
-            type="tel"
-            autoComplete="tel"
-            placeholder="+237 6 00 00 00 00"
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.phone?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.phone[0]}</p>
-          )}
-        </div>
+        <Input
+          id="phone"
+          name="phone"
+          type="tel"
+          label="Téléphone (optionnel)"
+          autoComplete="tel"
+          placeholder="+237 6 00 00 00 00"
+          error={state?.errors?.phone?.[0]}
+        />
 
         {role === 'recruteur' && (
-          <div>
-            <label htmlFor="entrepriseName" className="block text-sm font-medium text-zinc-700">
-              Nom de l&apos;entreprise
-            </label>
-            <input
-              id="entrepriseName"
-              name="entrepriseName"
-              type="text"
-              required
-              minLength={2}
-              maxLength={200}
-              className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-            />
-            {state?.errors?.entrepriseName?.[0] && (
-              <p className="mt-1 text-sm text-red-600">{state.errors.entrepriseName[0]}</p>
-            )}
-          </div>
+          <Input
+            id="entrepriseName"
+            name="entrepriseName"
+            type="text"
+            label="Nom de l'entreprise"
+            required
+            minLength={2}
+            maxLength={200}
+            error={state?.errors?.entrepriseName?.[0]}
+          />
         )}
 
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
-            Mot de passe
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={8}
-            maxLength={128}
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.password?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.password[0]}</p>
-          )}
-        </div>
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          label="Mot de passe"
+          autoComplete="new-password"
+          required
+          minLength={8}
+          maxLength={128}
+          error={state?.errors?.password?.[0]}
+        />
 
-        <div>
-          <label htmlFor="confirmPassword" className="block text-sm font-medium text-zinc-700">
-            Confirmer le mot de passe
-          </label>
-          <input
-            id="confirmPassword"
-            name="confirmPassword"
-            type="password"
-            autoComplete="new-password"
-            required
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.confirmPassword?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.confirmPassword[0]}</p>
-          )}
-        </div>
+        <Input
+          id="confirmPassword"
+          name="confirmPassword"
+          type="password"
+          label="Confirmer le mot de passe"
+          autoComplete="new-password"
+          required
+          error={state?.errors?.confirmPassword?.[0]}
+        />
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {pending ? 'Création du compte' : 'Créer mon compte'}
-        </button>
+        <Button type="submit" disabled={pending} className="w-full">
+          {pending ? 'Création du compte…' : 'Créer mon compte'}
+        </Button>
       </form>
 
-      <p className="mt-4 text-sm text-zinc-600">
+      <p className="mt-4 text-sm text-ink-muted">
         Déjà un compte ?{' '}
-        <Link href="/login" className="font-medium text-zinc-900 underline">
+        <Link href="/login" className="font-medium text-brand hover:underline">
           Se connecter
         </Link>
       </p>
-    </div>
+    </Card>
   )
 }

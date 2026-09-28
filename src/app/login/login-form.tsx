@@ -4,6 +4,9 @@ import { useActionState } from 'react'
 import Link from 'next/link'
 
 import { login } from '@/app/actions/auth'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
 interface LoginFormProps {
   /** Compte créé avec succès avant redirection (?registered=1). */
@@ -18,11 +21,14 @@ export function LoginForm({ registered, authError }: LoginFormProps) {
   const formError = state?.message ?? (authError ? 'Email ou mot de passe incorrect.' : null)
 
   return (
-    <div className="w-full max-w-sm">
-      <h1 className="text-xl font-semibold text-zinc-900">Connexion</h1>
+    <Card className="w-full max-w-sm p-6">
+      <h1 className="text-xl font-bold tracking-tight text-ink">Connexion</h1>
 
       {registered && (
-        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <p
+          role="status"
+          className="mt-4 rounded-sm border border-ok bg-ok-tint px-3 py-2 text-sm text-ok"
+        >
           Compte créé. Vous pouvez maintenant vous connecter.
         </p>
       )}
@@ -31,61 +37,43 @@ export function LoginForm({ registered, authError }: LoginFormProps) {
         {formError && (
           <p
             role="alert"
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            className="rounded-sm border border-danger bg-danger-tint px-3 py-2 text-sm text-danger"
           >
             {formError}
           </p>
         )}
 
-        <div>
-          <label htmlFor="identifier" className="block text-sm font-medium text-zinc-700">
-            Email ou téléphone
-          </label>
-          <input
-            id="identifier"
-            name="identifier"
-            type="text"
-            autoComplete="username"
-            required
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.identifier?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.identifier[0]}</p>
-          )}
-        </div>
+        <Input
+          id="identifier"
+          name="identifier"
+          type="text"
+          label="Email ou téléphone"
+          autoComplete="username"
+          required
+          error={state?.errors?.identifier?.[0]}
+        />
 
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
-            Mot de passe
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900"
-          />
-          {state?.errors?.password?.[0] && (
-            <p className="mt-1 text-sm text-red-600">{state.errors.password[0]}</p>
-          )}
-        </div>
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          label="Mot de passe"
+          autoComplete="current-password"
+          required
+          error={state?.errors?.password?.[0]}
+        />
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {pending ? 'Connexion en cours' : 'Se connecter'}
-        </button>
+        <Button type="submit" disabled={pending} className="w-full">
+          {pending ? 'Connexion en cours…' : 'Se connecter'}
+        </Button>
       </form>
 
-      <p className="mt-4 text-sm text-zinc-600">
+      <p className="mt-4 text-sm text-ink-muted">
         Pas encore de compte ?{' '}
-        <Link href="/register" className="font-medium text-zinc-900 underline">
+        <Link href="/register" className="font-medium text-brand hover:underline">
           Créer un compte
         </Link>
       </p>
-    </div>
+    </Card>
   )
 }
