@@ -88,7 +88,7 @@ export function Footer() {
         </div>
 
         <div className="border-t border-line py-6 text-xs text-ink-muted">
-          © {year} Job4Us — Cameroun · Afrique.
+          © {year} Job4Us · Cameroun · Afrique.
         </div>
       </div>
     </footer>

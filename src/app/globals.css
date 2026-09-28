@@ -25,7 +25,9 @@
   --color-brand: #0a58e6; /* CTA, liens, actif, 5,9:1 sur blanc */
   --color-brand-dark: #0846bc; /* survol / actif foncé */
   --color-brand-tint: #edf3ff; /* fond actif discret */
-  --color-accent: #ff6b35; /* orange : wordmark « 4Us » et badge Nouveau */
+  --color-accent: #e15a28; /* orange : wordmark « 4Us » — #ff6b35 rejeté par
+                              Lighthouse (2.53–2.83:1, seuil large text 3:1) ;
+                              #e15a28 atteint 3,3:1 minimum sur tous les fonds */
 
   /* États métier */
   --color-ok: #0f7b4f;

@@ -222,6 +222,7 @@ export function MobileMenu({ primary, secondary, user }: MobileMenuProps) {
                     <form action={logout}>
                       <button
                         type="submit"
+                        onClick={close}
                         className="flex h-11 w-full items-center justify-center gap-2 rounded-sm border border-line-strong text-sm font-medium text-danger transition-colors duration-fast hover:bg-danger-tint"
                       >
                         <IconLogout size={16} />

@@ -10,11 +10,7 @@ import Link from 'next/link'
 
 export function Logo() {
   return (
-    <Link
-      href="/"
-      className="flex shrink-0 items-center gap-2.5"
-      aria-label="Job4Us, retour à l'accueil"
-    >
+    <Link href="/" className="flex shrink-0 items-center gap-2.5">
       <span
         className="flex size-9 items-center justify-center rounded-md bg-brand"
         aria-hidden="true"
