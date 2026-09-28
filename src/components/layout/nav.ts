@@ -73,3 +73,9 @@ export const ROLE_LABEL: Record<Role, string> = {
   recruteur: 'Recruteur',
   admin: 'Administrateur',
 }
+
+/** Le chemin correspond-il au lien ? (exact, ou sous-chemin pour un préfixe) */
+export function isActiveLink(pathname: string, href: string): boolean {
+  if (href === '/') return pathname === '/'
+  return pathname === href || pathname.startsWith(`${href}/`)
+}

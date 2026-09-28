@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { IconBell } from '@/components/icons'
 import { AvatarMenu } from './avatar-menu'
 import { Logo } from './logo'
+import { MobileMenu } from './mobile-menu'
 import { NavLinks } from './nav-links'
 import { NAV_PRIMARY, NAV_SECONDARY, PUBLIC_NAV } from './nav'
 import { SearchForm } from './search-form'
@@ -13,8 +14,8 @@ import { SearchForm } from './search-form'
 // Server component : session Auth.js + compteur de notifications non lues.
 // - visiteur : nav publique + recherche + Connexion / Créer un compte ;
 // - connecté  : nav primaire du rôle (desktop), recherche, cloche avec
-//               compteur, menu profil (navigation secondaire + déconnexion).
-// Le menu mobile rejoint cette barre dans la sous-tâche suivante.
+//               compteur, menu profil (navigation secondaire + déconnexion) ;
+// - < lg      : tiroir mobile (burger) qui reprend les mêmes navigations.
 // ---------------------------------------------------------------------------
 
 export async function Header() {
@@ -84,6 +85,12 @@ export async function Header() {
               </Link>
             </>
           )}
+
+          <MobileMenu
+            primary={primary}
+            secondary={secondary}
+            user={isAuthed && role ? { name, role } : null}
+          />
         </div>
       </div>
     </header>

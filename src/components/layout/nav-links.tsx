@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import type { NavItem } from './nav'
+import { isActiveLink } from './nav'
 
 // ─── Liens de navigation principale (desktop) ────────────────────────────────
 // État actif = aria-current="page" + filet 3px bleu ancré au bas du header
@@ -16,11 +17,6 @@ interface NavLinksProps {
   className?: string
 }
 
-function isActive(pathname: string, href: string): boolean {
-  if (href === '/') return pathname === '/'
-  return pathname === href || pathname.startsWith(`${href}/`)
-}
-
 export function NavLinks({ items, className }: NavLinksProps) {
   const pathname = usePathname()
 
@@ -28,7 +24,7 @@ export function NavLinks({ items, className }: NavLinksProps) {
     <nav aria-label="Navigation principale" className={className}>
       <ul className="flex items-center">
         {items.map((item) => {
-          const active = isActive(pathname, item.href)
+          const active = isActiveLink(pathname, item.href)
           return (
             <li key={item.href}>
               <Link
