@@ -2,49 +2,59 @@
 
 /* ───────────────────────────────────────────────────────────────
    Design tokens Job4Us
-   Direction validée : « Produit chaleureux » (Étape 2/3).
-   Contraintes : aucun dégradé, rayons 4/6/8px maximum (jamais
+   Direction validée : « PHP+ » — le design du Laravel legacy repris
+   comme base et amélioré (refonte M2 v2, Étapes 1-3 validées) :
+   fond gris froid, bleu #0066FF pour tous les CTA, orange réservé
+   au wordmark « 4Us ».
+   Contraintes : aucun dégradé, boutons 8px maximum (jamais
    pilule), contrastes AA minimum (4,5:1), texte >= 12px.
    ─────────────────────────────────────────────────────────────── */
 
 @theme {
   /* Surfaces */
-  --color-canvas: #faf9f6; /* fond de page (neutre chaud) */
-  --color-surface: #ffffff; /* cartes, header, tiroir */
-  --color-surface-alt: #f3f2ee; /* sections alternées, en-têtes de tableau */
+  --color-canvas: #f1f5f9; /* fond de page (bg-light PHP) */
+  --color-surface: #ffffff; /* cartes, navbar, tiroir */
+  --color-surface-alt: #f8faff; /* sections alternées, cartes d'info, survols */
 
   /* Texte */
-  --color-ink: #1a1d21; /* principal, 15,7:1 sur canvas */
-  --color-ink-muted: #5f6672; /* secondaire, 5,3:1 sur canvas */
+  --color-ink: #0f172a; /* principal, 16,3:1 sur canvas */
+  --color-ink-muted: #5b6b82; /* secondaire, 4,96:1 sur canvas — le #64748B
+                                 du PHP descendait à 4,34:1 sur #F1F5F9 */
 
   /* Filets */
-  --color-line: #e8e6e1; /* bordures 1px, accordées au fond chaud */
-  --color-line-strong: #d6d3cc; /* champs, tableaux */
+  --color-line: #e2e8f0; /* bordures 1px (exact --border PHP) */
+  --color-line-strong: #cbd5e1; /* champs, tableaux, survol de carte */
 
   /* Marque et actions (bleu = tous les CTA ; orange = marque seule) */
-  --color-brand: #0a58e6; /* CTA, liens, actif, 5,9:1 sur blanc */
-  --color-brand-dark: #0846bc; /* survol / actif foncé */
-  --color-brand-tint: #edf3ff; /* fond actif discret */
+  --color-brand: #0066ff; /* CTA, liens, actif — 4,84:1 en blanc sur bleu */
+  --color-brand-dark: #0044bb; /* survol / actif foncé (exact --primary-dark) */
+  --color-brand-tint: #eff6ff; /* fond actif discret (exact --primary-light) */
   --color-accent: #e15a28; /* orange : wordmark « 4Us » — #ff6b35 rejeté par
                               Lighthouse (2.53–2.83:1, seuil large text 3:1) ;
                               #e15a28 atteint 3,3:1 minimum sur tous les fonds */
+  --color-accent-strong: #c94910; /* orange porteur de texte blanc : 4,7:1
+                                     (compteurs, badges — réservé M3+) */
 
-  /* États métier */
-  --color-ok: #0f7b4f;
-  --color-ok-tint: #e9f6f0;
-  --color-danger: #c23333;
-  --color-danger-tint: #fbeded;
-  --color-warn: #b45309;
-  --color-warn-tint: #fcf3e7;
+  /* États métier (versions assombries du PHP : #10b981 / #ef4444 /
+     #f59e0b échouent en texte petit, 2,4 à 3,8:1) */
+  --color-ok: #047857; /* 5,5:1 sur blanc */
+  --color-ok-tint: #ecfdf5;
+  --color-danger: #b91c1c; /* 6,5:1 sur blanc, 5,9:1 sur sa teinte */
+  --color-danger-tint: #fef2f2;
+  --color-warn: #92400e; /* 7,1:1 sur blanc */
+  --color-warn-tint: #fffbeb;
 
-  /* Rayons (échelle fermée, maximum 8px) */
-  --radius-sm: 0.25rem; /* 4px : boutons, champs, badges */
-  --radius-md: 0.375rem; /* 6px : nav, tiroir, menus */
-  --radius-lg: 0.5rem; /* 8px : cartes, modales */
+  /* Rayons (échelle fermée ; boutons et champs 8px maximum) */
+  --radius-sm: 0.5rem; /* 8px : boutons, champs, avatar carré */
+  --radius-md: 0.75rem; /* 12px : cartes, menus, tiroir, liens sidebar */
+  --radius-lg: 1rem; /* 16px : panneaux larges (carte auth) */
 
-  /* Ombres : une seule intensité au repos, une au survol */
-  --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.06);
-  --shadow-lift: 0 4px 12px rgba(26, 29, 33, 0.1); /* survol de carte uniquement */
+  /* Ombres : une au repos (identique au --card-shadow PHP) */
+  --shadow-card:
+    0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  /* une seule pour les éléments soulevés (menus, survol de carte) */
+  --shadow-lift:
+    0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
 
   /* Mouvement : court et fonctionnel (jamais décoratif) */
   --duration-fast: 150ms; /* survol, focus, couleurs */
