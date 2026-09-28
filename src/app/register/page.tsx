@@ -2,12 +2,14 @@ import type { Metadata } from 'next'
 
 import { RegisterForm } from './register-form'
 
-export const metadata: Metadata = { title: 'Créer un compte | Job4Us' }
+// Titre court : le template global ajoute « | Job4Us ».
+export const metadata: Metadata = { title: 'Créer un compte' }
 
 export default function RegisterPage() {
+  // Pas de <main> ici : le layout racine fournit déjà <main id="contenu">.
   return (
-    <main className="flex min-h-screen items-start justify-center bg-white px-4 py-16">
+    <div className="flex min-h-[calc(100svh-4rem)] items-start justify-center px-4 py-12">
       <RegisterForm />
-    </main>
+    </div>
   )
 }
