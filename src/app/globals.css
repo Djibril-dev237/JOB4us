@@ -20,6 +20,8 @@
   --color-ink: #0f172a; /* principal, 16,3:1 sur canvas */
   --color-ink-muted: #5b6b82; /* secondaire, 4,96:1 sur canvas — le #64748B
                                  du PHP descendait à 4,34:1 sur #F1F5F9 */
+  --color-ink-faint: #94a3b8; /* secondaire sur fond sombre (footer navy) —
+                                 6,9:1 sur ink #0F172A */
 
   /* Filets */
   --color-line: #e2e8f0; /* bordures 1px (exact --border PHP) */

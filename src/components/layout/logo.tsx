@@ -5,9 +5,20 @@ import Link from 'next/link'
 // « Job » bleu / « 4Us » orange + tagline). Tokens actuels : brand #0066FF,
 // accent #E15A28 (contraste AA — #FF6B35 rejeté en Lighthouse), badge rayon
 // 12px (fidèle au badge 11px PHP), tagline 12px/4,9:1 (diagnostic M2-1).
+// variant="dark" : lockup sur fond sombre (footer navy) — le filet passe en
+// blanc 20 % et la tagline en ink-faint (6,9:1 sur ink ; ink-muted n'aurait
+// que 3,3:1). « Job » (3,7:1) et « 4Us » (4,8:1) restent au-dessus du seuil
+// large text 3:1 (20px/900).
 // ---------------------------------------------------------------------------
 
-export function Logo() {
+interface LogoProps {
+  /** Fond du contexte : clair (défaut) ou sombre (footer). */
+  variant?: 'light' | 'dark'
+}
+
+export function Logo({ variant = 'light' }: LogoProps) {
+  const dark = variant === 'dark'
+
   return (
     <Link href="/" className="flex shrink-0 items-center gap-2.5">
       <span
@@ -24,12 +35,20 @@ export function Logo() {
         </svg>
       </span>
 
-      <span className="hidden border-l border-line pl-2.5 leading-none sm:block">
+      <span
+        className={`hidden border-l pl-2.5 leading-none sm:block ${
+          dark ? 'border-white/20' : 'border-line'
+        }`}
+      >
         <span className="block text-xl font-black tracking-tight">
           <span className="text-brand">Job</span>
           <span className="text-accent">4Us</span>
         </span>
-        <span className="mt-1 block text-2xs font-semibold uppercase tracking-[0.15em] text-ink-muted">
+        <span
+          className={`mt-1 block text-2xs font-semibold uppercase tracking-[0.15em] ${
+            dark ? 'text-ink-faint' : 'text-ink-muted'
+          }`}
+        >
           Cameroun · Afrique
         </span>
       </span>
