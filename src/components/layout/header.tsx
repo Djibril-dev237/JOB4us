@@ -11,12 +11,21 @@ import { NAV_PRIMARY, NAV_SECONDARY, PUBLIC_NAV } from './nav'
 import { SearchForm } from './search-form'
 
 // ─── Header global ───────────────────────────────────────────────────────────
-// Server component : session Auth.js + compteur de notifications non lues.
+// Server component async : session Auth.js + compteur de notifications.
+//
+// POSITION DE SUSPENSION ÉPROUVÉE (bug upstream vercel/next.js#98097) :
+// enfant direct du layout racine SYNCHRONE, sans WRAPPER {children}.
+// Dans cette position, la suspension attend le flush du shell sans activer la
+// boundary loading.tsx → hydratation intacte. Testés et cassés (squelette
+// resté en place, contenu dans un div hidden jamais swapé, hydratation
+// perdue, console propre) : layout racine async, wrapper async autour de
+// {children} (ShellFrame), et composants async sous loading.tsx.
+//
 // Réf. layouts/app.blade.php (navbar 64px, ombre 0 1px 8px) :
 // - visiteur : liens publics centrés + Connexion (contour bleu) /
 //   Créer un compte (plein) — la recherche vit dans le hero de l'accueil ;
 // - connecté  : recherche 340px + cloche (compteur réel, orange accent-strong)
-//   + menu profil ; la navigation du rôle migre dans la sidebar (groupe (app)) ;
+//   + menu profil ; toute la navigation du rôle vit dans la sidebar ;
 // - < lg      : tiroir mobile (burger) qui reprend les mêmes navigations.
 // ---------------------------------------------------------------------------
 
@@ -41,9 +50,11 @@ export async function Header() {
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8">
         <Logo />
 
-        <div className="hidden flex-1 justify-center lg:flex">
-          <NavLinks items={primary} />
-        </div>
+        {!isAuthed && (
+          <div className="hidden flex-1 justify-center lg:flex">
+            <NavLinks items={primary} />
+          </div>
+        )}
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
           {isAuthed && <SearchForm />}

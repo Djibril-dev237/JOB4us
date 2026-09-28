@@ -25,8 +25,8 @@ interface AvatarMenuProps {
   items: NavItem[]
 }
 
-/** Initiales pour l'avatar (1 ou 2 caractères). */
-function initials(name: string): string {
+/** Initiales pour l'avatar (1 ou 2 caractères). Exporté pour la sidebar. */
+export function initials(name: string): string {
   return name
     .split(/\s+/)
     .filter(Boolean)

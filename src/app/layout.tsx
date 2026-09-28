@@ -21,15 +21,18 @@ export const metadata: Metadata = {
 
 // ─── Layout racine ───────────────────────────────────────────────────────────
 // html/body + Header + shells des route groups (site) et (app).
+// RESTE SYNCHRONE : c'est la position éprouvée face au bug upstream
+// vercel/next.js#98097 (voir le commentaire détaillé dans header.tsx).
 //
-// RÈGLE DE SUSPENSION (bug upstream vercel/next.js#98097, repro M2 v2) :
-// loading.tsx ne s'applique qu'aux ENFANTS de ce layout. Le Header (async :
-// session Auth.js + compteur de notifications) doit rester ICI, au-dessus de
-// la boundary — déplacé sous loading.tsx, l'hydratation du sous-arbre est
-// perdue (squelette resté en place, bandeau client absent, console propre).
-// Donc : toute suspension async vit dans ce layout ; layouts de groupes et
-// pages restent strictement synchrones (identité descendant via props).
+// RÈGLE : la seule suspension async tolérée est le Header — enfant direct de
+// ce layout, sans wrapper {children}. Le layout racine async, un wrapper
+// async autour de {children}, et tout composant sous loading.tsx cassent
+// l'hydratation du sous-arbre (squelette bloqué, contenu dans un div hidden
+// jamais swapé, console propre) — testés en dev.
+// Donc : layouts de groupes et pages restent strictement synchrones ; les
+// données de session côté sidebar descendent du client via useSession.
 // ---------------------------------------------------------------------------
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="fr" className={`${inter.variable} h-full antialiased`}>
