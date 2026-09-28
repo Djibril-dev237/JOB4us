@@ -8,8 +8,9 @@ import { isActiveLink } from './nav'
 
 // ─── Liens de navigation principale (desktop) ────────────────────────────────
 // État actif = aria-current="page" + filet 3px bleu ancré au bas du header
-// (signature de la direction B, reprise de la barre active de la sidebar
-// legacy). Le lien occupe toute la hauteur du header : cible tactile 64px.
+// (réf. état actif de la sidebar PHP : filet latéral 3px — repris ici en
+// filet bas pour la navbar). Le lien occupe toute la hauteur du header :
+// cible tactile 64px.
 // ---------------------------------------------------------------------------
 
 interface NavLinksProps {

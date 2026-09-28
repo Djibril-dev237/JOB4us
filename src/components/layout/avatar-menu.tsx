@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 import { logout } from '@/app/actions/auth'
 import { IconChevronDown, IconLogout } from '@/components/icons'
+import { Badge } from '@/components/ui/badge'
 import type { Role } from '@/lib/definitions'
 import { ROLE_LABEL, type NavItem } from './nav'
 
@@ -78,7 +79,7 @@ export function AvatarMenu({ user, items }: AvatarMenuProps) {
       >
         <span
           aria-hidden="true"
-          className="flex size-7 items-center justify-center rounded-full bg-brand-tint text-xs font-semibold text-brand"
+          className="flex size-7 items-center justify-center rounded-sm bg-brand-tint text-xs font-semibold text-brand-dark"
         >
           {initials(user.name)}
         </span>
@@ -93,16 +94,16 @@ export function AvatarMenu({ user, items }: AvatarMenuProps) {
       {open && (
         <div
           id={menuId}
-          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border border-line bg-surface p-2 shadow-lift"
+          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-md border border-line bg-surface p-2 shadow-lift"
         >
           <div className="px-3 py-2">
             <p className="truncate text-sm font-medium text-ink">{user.name}</p>
             {user.email && (
               <p className="mt-0.5 truncate text-xs text-ink-muted">{user.email}</p>
             )}
-            <span className="mt-2 inline-block rounded-sm bg-brand-tint px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-brand">
+            <Badge variant="brand" className="mt-2">
               {ROLE_LABEL[user.role]}
-            </span>
+            </Badge>
           </div>
 
           <hr className="my-1 border-line" />

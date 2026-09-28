@@ -12,9 +12,11 @@ import { SearchForm } from './search-form'
 
 // ─── Header global ───────────────────────────────────────────────────────────
 // Server component : session Auth.js + compteur de notifications non lues.
-// - visiteur : nav publique + recherche + Connexion / Créer un compte ;
-// - connecté  : nav primaire du rôle (desktop), recherche, cloche avec
-//               compteur, menu profil (navigation secondaire + déconnexion) ;
+// Réf. layouts/app.blade.php (navbar 64px, ombre 0 1px 8px) :
+// - visiteur : liens publics centrés + Connexion (contour bleu) /
+//   Créer un compte (plein) — la recherche vit dans le hero de l'accueil ;
+// - connecté  : recherche 340px + cloche (compteur réel, orange accent-strong)
+//   + menu profil ; la navigation du rôle migre dans la sidebar (groupe (app)) ;
 // - < lg      : tiroir mobile (burger) qui reprend les mêmes navigations.
 // ---------------------------------------------------------------------------
 
@@ -35,14 +37,16 @@ export async function Header() {
   const email = session?.user?.email ?? null
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-surface">
+    <header className="sticky top-0 z-40 border-b border-line bg-surface shadow-[0_1px_8px_rgba(0,0,0,0.05)]">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8">
         <Logo />
 
-        <NavLinks items={primary} className="hidden lg:flex" />
+        <div className="hidden flex-1 justify-center lg:flex">
+          <NavLinks items={primary} />
+        </div>
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          <SearchForm />
+          {isAuthed && <SearchForm />}
 
           {isAuthed && role ? (
             <>
@@ -57,7 +61,7 @@ export async function Header() {
                 {unread > 0 && (
                   <span
                     aria-hidden="true"
-                    className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-2xs font-semibold text-white"
+                    className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent-strong px-1 text-2xs font-semibold text-white"
                   >
                     {unread > 99 ? '99+' : unread}
                   </span>
@@ -73,7 +77,7 @@ export async function Header() {
             <>
               <Link
                 href="/login"
-                className="hidden h-9 items-center rounded-sm border border-line-strong px-3 text-sm font-medium text-ink transition-colors duration-fast hover:bg-surface-alt sm:inline-flex"
+                className="hidden h-9 items-center rounded-sm border border-brand px-3 text-sm font-medium text-brand transition-colors duration-fast hover:bg-brand-tint hover:text-brand-dark sm:inline-flex"
               >
                 Connexion
               </Link>

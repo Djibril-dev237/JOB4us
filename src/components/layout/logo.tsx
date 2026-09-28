@@ -2,10 +2,9 @@ import Link from 'next/link'
 
 // ─── Logo Job4Us ─────────────────────────────────────────────────────────────
 // Nom et logo conservés à l'identique du legacy (badge bleu + icône + lockup
-// « Job » bleu / « 4Us » orange + tagline). Seuls les jetons changent :
-// bleu de marque #0066FF -> token brand (#0A58E6, contraste AA), tagline
-// relevée de 9,3px/2,6:1 à 12px/5,3:1 (diagnostic M2-1), badge ramené au
-// rayon système 6px (l'échelle est fermée à 4/6/8px).
+// « Job » bleu / « 4Us » orange + tagline). Tokens actuels : brand #0066FF,
+// accent #E15A28 (contraste AA — #FF6B35 rejeté en Lighthouse), badge rayon
+// 12px (fidèle au badge 11px PHP), tagline 12px/4,9:1 (diagnostic M2-1).
 // ---------------------------------------------------------------------------
 
 export function Logo() {

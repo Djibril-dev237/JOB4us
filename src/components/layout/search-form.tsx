@@ -4,6 +4,9 @@ import { IconSearch } from '@/components/icons'
 // Formulaire GET natif vers /offres (champ q, héritage legacy OffrePublique).
 // Sans JavaScript : la page de résultats fera le parsing des paramètres
 // lors de la migration du module offres.
+// Réf. recherche navbar PHP (app.blade.php) : repos fond gris sans bordure
+// apparente, focus = bordure bleue + fond blanc, largeur 340px.
+// Rendue uniquement pour les connectés (le visiteur cherche depuis le hero).
 // ---------------------------------------------------------------------------
 
 export function SearchForm() {
@@ -23,7 +26,7 @@ export function SearchForm() {
           name="q"
           placeholder="Métier, mot-clé…"
           autoComplete="off"
-          className="h-9 w-44 rounded-sm border border-line-strong bg-canvas pl-8 pr-2.5 text-sm text-ink placeholder:text-ink-muted"
+          className="h-9 w-[340px] rounded-sm border-[1.5px] border-transparent bg-canvas pl-8 pr-2.5 text-sm text-ink transition-colors duration-fast placeholder:text-ink-muted focus:border-brand focus:bg-surface"
         />
       </div>
     </form>
