@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "legacy:files": "node --env-file=.env scripts/migrate-legacy-files.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
