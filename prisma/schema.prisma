@@ -304,6 +304,33 @@ model Candidature {
   @@map("candidatures")
 }
 
+// ---------------------------------------------------------------------------
+// JOURNAL D'ACCÈS AUX FICHIERS SENSIBLES (audit Étape 1 : aucune journalisation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Journal APPEND-ONLY des lectures de CV par un recruteur ou un admin
+ * (matrice Étape 2 : « admin = lecture justifiée + journal » ; le candidat
+ * lisant son propre CV n'est pas un événement sensible et n'est pas journalisé).
+ *
+ * Conception délibérée :
+ * - AUCUNE clé étrangère : la trace survit à la suppression d'un compte
+ *   (intégrité d'audit > intégrité référentielle) ;
+ * - pas d'updatedAt : table en ajout pur, jamais mise à jour ;
+ * - `cibleCandidatId` = l'identifiant du profil CV lu (la cible du fichier).
+ */
+model AccesFichier {
+  id             Int      @id @default(autoincrement())
+  acteurId       Int      @map("acteur_id")
+  cibleCandidatId Int     @map("cible_candidat_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([acteurId], map: "acces_fichiers_acteur_id_idx")
+  @@index([cibleCandidatId], map: "acces_fichiers_cible_candidat_id_idx")
+  @@index([createdAt], map: "acces_fichiers_created_at_idx")
+  @@map("acces_fichiers")
+}
+
 enum StatutCandidature {
   envoyee
   vue

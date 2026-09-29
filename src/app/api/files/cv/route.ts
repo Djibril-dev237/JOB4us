@@ -1,4 +1,5 @@
 import { auth } from '@/auth'
+import { logCvAccess } from '@/lib/audit'
 import { prisma } from '@/lib/prisma'
 import { downloadMeta, signDownloadUrl } from '@/lib/storage'
 import { NextResponse, type NextRequest } from 'next/server'
@@ -76,7 +77,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 })
   }
 
-  // 4. URL signée de 5 minutes : aucun objet accessible publiquement, aucune
+  // 4. Journal (matrice Étape 2) : recruteur ou admin UNIQUEMENT, écrit AVANT
+  //    toute diffusion — fail-closed : sans trace, pas d'URL signée.
+  if (role !== 'candidat') {
+    await logCvAccess(userId, candidat.id)
+  }
+
+  // 5. URL signée de 5 minutes : aucun objet accessible publiquement, aucune
   //    URL permanente ne quitte jamais le serveur.
   const { extension, contentType } = downloadMeta(candidat.cvPath, 'pdf')
   const url = await signDownloadUrl({
