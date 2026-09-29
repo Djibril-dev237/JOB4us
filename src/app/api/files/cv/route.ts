@@ -41,12 +41,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 })
   }
 
-  // 2. Paramètre strict : entier positif (sinon 400, pas de requête base).
+  // 2. Paramètre strict : entier strict positif (sinon 400, pas de requête
+  //    base). La regex exclut virgules, signes et zéros initiaux que
+  //    parseInt tronquerait silencieusement.
   const raw = request.nextUrl.searchParams.get('candidatId') ?? ''
-  const candidatId = Number.parseInt(raw, 10)
-  if (!Number.isInteger(candidatId) || candidatId <= 0) {
+  if (!/^[1-9][0-9]*$/.test(raw)) {
     return NextResponse.json({ error: 'Paramètre invalide.' }, { status: 400 })
   }
+  const candidatId = Number.parseInt(raw, 10)
 
   const candidat = await prisma.candidat.findUnique({
     where: { id: candidatId },

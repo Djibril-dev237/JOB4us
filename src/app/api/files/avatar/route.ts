@@ -32,12 +32,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 })
   }
 
-  // 2. Paramètre strict : entier positif.
+  // 2. Paramètre strict : entier strict positif (regex, cf. route CV).
   const raw = request.nextUrl.searchParams.get('userId') ?? ''
-  const targetId = Number.parseInt(raw, 10)
-  if (!Number.isInteger(targetId) || targetId <= 0) {
+  if (!/^[1-9][0-9]*$/.test(raw)) {
     return NextResponse.json({ error: 'Paramètre invalide.' }, { status: 400 })
   }
+  const targetId = Number.parseInt(raw, 10)
 
   const target = await prisma.user.findUnique({
     where: { id: targetId },
