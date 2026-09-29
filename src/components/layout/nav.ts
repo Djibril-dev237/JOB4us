@@ -22,8 +22,10 @@ export interface NavItem {
 /** Navigation publique (visiteur non connecté). */
 export const PUBLIC_NAV: NavItem[] = [
   { label: "Offres d'emploi", href: '/offres' },
-  // Catégories et « Comment ça marche » rejoindront cette liste avec la
-  // page d'accueil (ancres legacy #categories / #comment).
+  // Ancres legacy de la page d'accueil (accueil.blade.php : #categories,
+  // #comment) — jamais « actives » : ce sont des ancres, pas des routes.
+  { label: 'Catégories', href: '/#categories' },
+  { label: 'Comment ça marche', href: '/#comment' },
 ]
 
 export const NAV_SECONDARY: Record<Role, NavItem[]> = {
