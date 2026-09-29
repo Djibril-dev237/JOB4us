@@ -152,3 +152,38 @@ export async function deleteObject(key: string): Promise<void> {
     // Objet peut-être déjà absent : la suppression reste best-effort.
   }
 }
+
+// ─── Métadonnées de téléchargement ───────────────────────────────────────────
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+}
+
+/**
+ * Métadonnées de téléchargement déduites de la CLÉ d'objet (jamais d'un nom
+ * d'origine qui ne figure nulle part en base) :
+ * - extension sanitisée : minuscules, [a-z0-9]{1,5}, sinon `fallbackExt` ;
+ * - MIME correspondant ; extension inconnue → `application/octet-stream`,
+ *   que le navigateur télécharge sans jamais interpréter.
+ * La signature ajoute par-dessus `Content-Disposition: attachment` +
+ * `no-store` : défense en profondeur même si le type réel diffère du déclaré.
+ */
+export function downloadMeta(
+  key: string,
+  fallbackExt: string,
+): { extension: string; contentType: string } {
+  const segment = key.split('/').pop() ?? ''
+  const dotIndex = segment.lastIndexOf('.')
+  const raw = dotIndex >= 0 ? segment.slice(dotIndex + 1) : ''
+  const sanitized = raw.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const extension =
+    sanitized.length >= 1 && sanitized.length <= 5 ? sanitized : fallbackExt.toLowerCase()
+  return { extension, contentType: MIME_BY_EXTENSION[extension] ?? 'application/octet-stream' }
+}
