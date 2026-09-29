@@ -19,3 +19,11 @@ export function issuesToErrors(error: z.ZodError): Partial<Record<string, string
 export function formDataString(value: FormDataEntryValue | null): string {
   return typeof value === 'string' ? value : ''
 }
+
+/**
+ * Extrait un fichier du FormData : renvoie null si le champ est absent ou
+ * vide, pour que validateUpload puisse produire un message d'erreur clair.
+ */
+export function formDataFile(value: FormDataEntryValue | null): File | null {
+  return value instanceof File && value.size > 0 ? value : null
+}
