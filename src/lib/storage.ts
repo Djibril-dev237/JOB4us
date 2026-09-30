@@ -122,6 +122,14 @@ interface SignedDownload {
   /** Nom affiché au téléchargement (ASCII simple, ex. `cv.pdf`). */
   filename: string
   contentType: string
+  /**
+   * attachment (défaut) : le navigateur TÉLÉCHARGE, jamais d'interprétation.
+   * inline : réservé à l'AVATAR — et uniquement parce que les types images
+   * sont blanchis à l'envoi ET à la migration legacy (aucun SVG/HTML possible ;
+   * cf. src/lib/files.ts). Servi avec le MIME réel + `nosniff` + `no-store` :
+   * aucun vecteur d'exécution ne subsiste pour un format raster.
+   */
+  disposition?: 'attachment' | 'inline'
 }
 
 /**
@@ -136,7 +144,7 @@ export async function signDownloadUrl(download: SignedDownload): Promise<string>
   const command = new GetObjectCommand({
     Bucket: bucket,
     Key: download.key,
-    ResponseContentDisposition: `attachment; filename="${download.filename}"`,
+    ResponseContentDisposition: `${download.disposition ?? 'attachment'}; filename="${download.filename}"`,
     ResponseContentType: download.contentType,
     ResponseCacheControl: 'private, no-store, max-age=0',
   })

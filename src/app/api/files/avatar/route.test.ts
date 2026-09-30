@@ -98,6 +98,7 @@ describe('GET /api/files/avatar — propriétaire (ligne 2)', () => {
       key: 'avatars/uuid.png',
       filename: 'avatar-7.png',
       contentType: 'image/png',
+      disposition: 'inline',
     })
   })
 })

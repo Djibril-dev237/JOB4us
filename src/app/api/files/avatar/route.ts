@@ -54,14 +54,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // 4. URL signée de 5 minutes (jamais d'URL publique permanente).
+  //    `inline` JUSTIFIÉ ici : la route n'diffuse que des images raster
+  //    (types blanchis à l'envoi et à la migration — aucun SVG/HTML possible),
+  //    avec le MIME réel de la clé, `nosniff` et `no-store` : l'affichage
+  //    <img> du profil ne crée aucun vecteur d'exécution.
   const { extension, contentType } = downloadMeta(target.avatar, 'png')
   const url = await signDownloadUrl({
     key: target.avatar,
     filename: `avatar-${targetId}.${extension}`,
     contentType,
+    disposition: 'inline',
   })
 
   const response = NextResponse.redirect(url, 302)
   response.headers.set('Cache-Control', 'private, no-store, max-age=0')
+  response.headers.set('X-Content-Type-Options', 'nosniff')
   return response
 }

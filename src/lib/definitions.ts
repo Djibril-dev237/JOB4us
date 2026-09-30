@@ -120,6 +120,98 @@ export const UpdateProfileSchema = z.object({
 
 export type UpdateProfileData = z.infer<typeof UpdateProfileSchema>
 
+// ─── Schemas Zod — Profil candidat (M3) ──────────────────────────────────────
+
+/**
+ * Valeurs du champ « disponibilité » côté FORMULAIRE : les chaînes legacy de
+ * la base (`1_mois`, `3_mois`), vérifiées sur la validation PHP du
+ * ProfilController ET sur les @@map du schéma Prisma. Le formulaire parle en
+ * valeurs legacy ; la conversion vers les énumérations Prisma passe par les
+ * deux maps ci-dessous (jamais d'inversion silencieuse ailleurs).
+ */
+export const DISPONIBILITE_FORM = [
+  'immediat',
+  '1_mois',
+  '3_mois',
+  'non_disponible',
+] as const
+
+export type DisponibiliteForm = (typeof DISPONIBILITE_FORM)[number]
+
+/** Valeurs TS de l'enum Prisma `Disponibilite` (schéma vérifié). */
+export type DisponibilitePrisma = 'immediat' | 'un_mois' | 'trois_mois' | 'non_disponible'
+
+export const DISPONIBILITE_VERS_PRISMA: Record<DisponibiliteForm, DisponibilitePrisma> = {
+  immediat: 'immediat',
+  '1_mois': 'un_mois',
+  '3_mois': 'trois_mois',
+  non_disponible: 'non_disponible',
+}
+
+export const DISPONIBILITE_VERS_FORM: Record<DisponibilitePrisma, DisponibiliteForm> = {
+  immediat: 'immediat',
+  un_mois: '1_mois',
+  trois_mois: '3_mois',
+  non_disponible: 'non_disponible',
+}
+
+/**
+ * Mise à jour du profil candidat (M3) — reprend EXACTEMENT les champs
+ * validés par le legacy ProfilController::update (vérifiés dans le PHP, pas
+ * supposés) : user { name, phone, ville } + candidat { titre_profil, resume,
+ * date_naissance, genre, disponibilite } + remplacement du jeu de
+ * compétences. L'avatar et le CV ont leurs propres actions (uploadAvatar /
+ * uploadCv).
+ *
+ * Politique anti mass-assign identique à M1 : raw construit par clés
+ * explicites (le payload `role`, `id`, `password`… n'est JAMAIS lu) + `.strip()`
+ * Zod (mode par défaut) en filet complémentaire.
+ *
+ * Durcisseurs assumés par rapport au legacy (commentés) :
+ * - resume borné à 10 000 caractères (la colonne TEXT admettrait 64 Ko,
+ *   aucune limite PHP n'existait) ;
+ * - dateNaissance refusée dans le futur (la règle `date` legacy l'acceptait) ;
+ * - competences bornées à 100 entrées (legacy : sync() non borné).
+ */
+export const ProfilCandidatSchema = z.object({
+  name: z
+    .string()
+    .min(2, { error: 'Le nom doit contenir au moins 2 caractères.' })
+    .max(100)
+    .trim(),
+  phone: z
+    .string()
+    .regex(/^\+?[\d\s\-().]{8,20}$/, { error: 'Numéro de téléphone invalide.' })
+    .optional()
+    .or(z.literal('')),
+  ville: z.string().max(100, { error: 'La ville ne doit pas dépasser 100 caractères.' }).trim().optional().or(z.literal('')),
+  titreProfil: z
+    .string()
+    .max(150, { error: 'Le titre ne doit pas dépasser 150 caractères.' })
+    .trim()
+    .optional()
+    .or(z.literal('')),
+  resume: z
+    .string()
+    .max(10_000, { error: 'Le résumé ne doit pas dépasser 10 000 caractères.' })
+    .optional()
+    .or(z.literal('')),
+  dateNaissance: z
+    .iso.date({ error: 'Date de naissance invalide.' })
+    .refine((value) => new Date(value) <= new Date(), {
+      error: 'La date de naissance ne peut pas être dans le futur.',
+    })
+    .or(z.literal(''))
+    .optional(),
+  genre: z.enum(['homme', 'femme', 'autre']).optional().or(z.literal('')),
+  disponibilite: z.enum(DISPONIBILITE_FORM).optional().or(z.literal('')),
+  competences: z
+    .array(z.coerce.number().int().positive())
+    .max(100, { error: 'Trop de compétences sélectionnées (maximum 100).' }),
+})
+
+export type ProfilCandidatFormData = z.infer<typeof ProfilCandidatSchema>
+
 // ─── FormState générique pour useActionState ─────────────────────────────────
 
 export type FormState<T extends Record<string, unknown> = Record<string, string[]>> =
