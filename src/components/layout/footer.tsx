@@ -34,7 +34,8 @@ const FOOTER_NAVS: FooterNav[] = [
     links: [
       { label: 'Mes offres', href: '/recruteur/offres' },
       { label: 'Candidatures reçues', href: '/recruteur/candidatures' },
-      { label: 'Recherche candidats', href: '/recruteur/candidats' },
+      // Pas d'entrée « Recherche candidats » : annuaire supprimé pour
+      // confidentialité (décision documentée dans nav.ts).
     ],
   },
   {

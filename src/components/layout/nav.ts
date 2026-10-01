@@ -100,7 +100,11 @@ export const SIDEBAR_NAV: Record<Role, SidebarSection[]> = {
       items: [
         { label: 'Mes offres', href: '/recruteur/offres' },
         { label: 'Candidatures reçues', href: '/recruteur/candidatures' },
-        { label: 'Recherche candidats', href: '/recruteur/candidats' },
+        // « Recherche candidats » (annuaire legacy /recruteur/candidats) :
+        // RETIRÉ par décision de confidentialité (matrice Étape 2 validée) :
+        // aucun annuaire de profils candidats ne sera construit. Un recruteur
+        // ne voit un CV que s'il a reçu une candidature sur SES offres
+        // (matrice M4) — jamais une base de profils consultable.
       ],
     },
     {

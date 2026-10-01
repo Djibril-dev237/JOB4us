@@ -15,7 +15,7 @@ export default function RecruteurDashboard() {
     <div className="max-w-3xl">
       <h1 className="text-2xl font-bold tracking-tight text-ink">Tableau de bord</h1>
       <p className="mt-2 text-base text-ink-muted">
-        Offres publiées, candidatures reçues et recherche de candidats.
+        Offres publiées et candidatures reçues.
       </p>
     </div>
   )
