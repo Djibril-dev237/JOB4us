@@ -35,10 +35,12 @@ interface EntrepriseData {
   logoUpdatedAt: string
 }
 
-// Libellés : la vue Blade recruteur/entreprise n'est PAS dans la copie
-// d'audit (non vérifiable) — la valeur brute de la liste legacy s'affiche
-// telle quelle, sans reformulation inventée.
-const TAILLE_OPTIONS = TAILLE_ENTREPRISE_FORM.map((value) => ({ value, label: value }))
+// Libellés EXACTS de la vue legacy recruteur/entreprise/edit.blade.php
+// (« 11-50 employés »…) ; valeurs de champ identiques (definitions.ts).
+const TAILLE_OPTIONS = TAILLE_ENTREPRISE_FORM.map((value) => ({
+  value,
+  label: `${value} employés`,
+}))
 
 const FILE_INPUT_CLASSES = [
   'block w-full text-sm text-ink',
@@ -204,6 +206,8 @@ export function EntrepriseForm() {
             </p>
           )}
 
+          {/* Ordre des champs = vue legacy edit.blade.php (général →
+              contact), regroupés ici en deux grilles responsive. */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               id="nom"
@@ -213,6 +217,7 @@ export function EntrepriseForm() {
               autoComplete="organization"
               required
               maxLength={150}
+              className="sm:col-span-2"
               defaultValue={entreprise.nom}
               error={infosState?.errors?.nom?.[0]}
             />
@@ -221,6 +226,7 @@ export function EntrepriseForm() {
               name="secteurActivite"
               type="text"
               label="Secteur d'activité"
+              placeholder="Ex: Informatique & Tech"
               maxLength={150}
               defaultValue={entreprise.secteurActivite}
               error={infosState?.errors?.secteurActivite?.[0]}
@@ -231,26 +237,31 @@ export function EntrepriseForm() {
               label="Taille de l'entreprise"
               options={TAILLE_OPTIONS}
               withEmpty
-              emptyLabel="Non renseigné"
+              emptyLabel="-- Choisir --"
               defaultValue={entreprise.tailleEntreprise}
               error={infosState?.errors?.tailleEntreprise?.[0]}
             />
-            <Input
-              id="siteWeb"
-              name="siteWeb"
-              type="url"
-              label="Site web"
-              placeholder="https://exemple.cm"
-              maxLength={191}
-              defaultValue={entreprise.siteWeb}
-              error={infosState?.errors?.siteWeb?.[0]}
-            />
+          </div>
+
+          <Textarea
+            id="description"
+            name="description"
+            label="Description"
+            rows={6}
+            maxLength={10_000}
+            placeholder="Décrivez votre entreprise, sa mission, ses valeurs..."
+            defaultValue={entreprise.description}
+            error={infosState?.errors?.description?.[0]}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <Input
               id="emailContact"
               name="emailContact"
               type="email"
               label="Email de contact"
               autoComplete="email"
+              placeholder="contact@entreprise.com"
               maxLength={150}
               defaultValue={entreprise.emailContact}
               error={infosState?.errors?.emailContact?.[0]}
@@ -261,9 +272,33 @@ export function EntrepriseForm() {
               type="tel"
               label="Téléphone"
               autoComplete="tel"
+              placeholder="+237 6XX XXX XXX"
               maxLength={20}
               defaultValue={entreprise.telephone}
               error={infosState?.errors?.telephone?.[0]}
+            />
+            <Input
+              id="siteWeb"
+              name="siteWeb"
+              type="url"
+              label="Site web"
+              placeholder="https://www.entreprise.com"
+              maxLength={191}
+              className="sm:col-span-2"
+              defaultValue={entreprise.siteWeb}
+              error={infosState?.errors?.siteWeb?.[0]}
+            />
+            <Input
+              id="adresse"
+              name="adresse"
+              type="text"
+              label="Adresse"
+              autoComplete="street-address"
+              placeholder="Rue, quartier..."
+              maxLength={191}
+              className="sm:col-span-2"
+              defaultValue={entreprise.adresse}
+              error={infosState?.errors?.adresse?.[0]}
             />
             <Input
               id="ville"
@@ -271,6 +306,7 @@ export function EntrepriseForm() {
               type="text"
               label="Ville"
               autoComplete="address-level2"
+              placeholder="Douala"
               maxLength={100}
               defaultValue={entreprise.ville}
               error={infosState?.errors?.ville?.[0]}
@@ -281,35 +317,15 @@ export function EntrepriseForm() {
               type="text"
               label="Pays"
               autoComplete="country-name"
+              placeholder="Cameroun"
               maxLength={100}
               defaultValue={entreprise.pays}
               error={infosState?.errors?.pays?.[0]}
             />
-            <Input
-              id="adresse"
-              name="adresse"
-              type="text"
-              label="Adresse"
-              autoComplete="street-address"
-              maxLength={191}
-              className="sm:col-span-2"
-              defaultValue={entreprise.adresse}
-              error={infosState?.errors?.adresse?.[0]}
-            />
           </div>
 
-          <Textarea
-            id="description"
-            name="description"
-            label="Description"
-            rows={5}
-            maxLength={10_000}
-            defaultValue={entreprise.description}
-            error={infosState?.errors?.description?.[0]}
-          />
-
           <Button type="submit" disabled={infosPending}>
-            {infosPending ? 'Enregistrement…' : 'Enregistrer les informations'}
+            {infosPending ? 'Enregistrement…' : 'Enregistrer les modifications'}
           </Button>
         </form>
       </Card>

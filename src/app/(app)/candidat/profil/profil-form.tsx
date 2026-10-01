@@ -44,9 +44,9 @@ interface ProfilData {
   competencesDisponibles: CompetenceOption[]
 }
 
-// Libellés des énumérations : la vue Blade du profil n'est PAS dans la copie
-// d'audit (non vérifiable) — libellés neutres choisis ici, valeurs de champ
-// identiques au legacy (cf. definitions.ts).
+// Libellés EXACTS de la vue legacy candidat/profil/edit.blade.php (lue dans
+// la copie d'audit, pas supposée) ; valeurs de champ identiques (cf.
+// definitions.ts).
 const GENRE_OPTIONS = [
   { value: 'homme', label: 'Homme' },
   { value: 'femme', label: 'Femme' },
@@ -55,8 +55,8 @@ const GENRE_OPTIONS = [
 
 const DISPONIBILITE_OPTIONS = [
   { value: 'immediat', label: 'Disponible immédiatement' },
-  { value: '1_mois', label: 'Sous 1 mois' },
-  { value: '3_mois', label: 'Sous 3 mois' },
+  { value: '1_mois', label: 'Dans 1 mois' },
+  { value: '3_mois', label: 'Dans 3 mois' },
   { value: 'non_disponible', label: 'Non disponible' },
 ]
 
@@ -243,12 +243,22 @@ export function ProfilForm() {
               error={profilState?.errors?.name?.[0]}
             />
             <Input
+              id="titreProfil"
+              name="titreProfil"
+              type="text"
+              label="Titre du profil"
+              placeholder="Ex: Développeur Web Full Stack"
+              maxLength={150}
+              defaultValue={profil.titreProfil}
+              error={profilState?.errors?.titreProfil?.[0]}
+            />
+            <Input
               id="phone"
               name="phone"
               type="tel"
               label="Téléphone"
               autoComplete="tel"
-              placeholder="+237 6 00 00 00 00"
+              placeholder="Ex: +237 6XX XXX XXX"
               defaultValue={profil.phone}
               error={profilState?.errors?.phone?.[0]}
             />
@@ -258,27 +268,20 @@ export function ProfilForm() {
               type="text"
               label="Ville"
               autoComplete="address-level2"
+              placeholder="Ex: Douala"
               maxLength={100}
               defaultValue={profil.ville}
               error={profilState?.errors?.ville?.[0]}
-            />
-            <Input
-              id="titreProfil"
-              name="titreProfil"
-              type="text"
-              label="Titre du profil"
-              maxLength={150}
-              defaultValue={profil.titreProfil}
-              error={profilState?.errors?.titreProfil?.[0]}
             />
           </div>
 
           <Textarea
             id="resume"
             name="resume"
-            label="Résumé"
-            rows={4}
+            label="Présentation"
+            rows={5}
             maxLength={10_000}
+            placeholder="Parlez de vous, de votre parcours et de vos objectifs..."
             defaultValue={profil.resume}
             error={profilState?.errors?.resume?.[0]}
           />
@@ -298,7 +301,7 @@ export function ProfilForm() {
               label="Genre"
               options={GENRE_OPTIONS}
               withEmpty
-              emptyLabel="Non renseigné"
+              emptyLabel="-- Choisir --"
               defaultValue={profil.genre}
               error={profilState?.errors?.genre?.[0]}
             />
@@ -316,7 +319,7 @@ export function ProfilForm() {
             <legend className="text-sm font-medium text-ink">Compétences</legend>
             {profil.competencesDisponibles.length === 0 ? (
               <p className="mt-2 text-sm text-ink-muted">
-                Aucune compétence au catalogue pour le moment.
+                Aucune compétence disponible.
               </p>
             ) : (
               <div className="mt-2 grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-sm border border-line p-2 sm:grid-cols-2">
@@ -345,7 +348,7 @@ export function ProfilForm() {
           </fieldset>
 
           <Button type="submit" disabled={profilPending}>
-            {profilPending ? 'Enregistrement…' : 'Enregistrer les informations'}
+            {profilPending ? 'Enregistrement…' : 'Enregistrer les modifications'}
           </Button>
         </form>
       </Card>
@@ -381,14 +384,19 @@ export function ProfilForm() {
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit" disabled={cvPending}>
-              {cvPending ? 'Envoi du CV…' : profil.hasCv ? 'Remplacer le CV' : 'Envoyer le CV'}
+              {/* Libellés legacy (vue show) : « Remplacer le CV » /
+                  « Upload mon CV ». */}
+              {cvPending ? 'Envoi du CV…' : profil.hasCv ? 'Remplacer le CV' : 'Uploader mon CV'}
             </Button>
             {profil.hasCv && (
+              // Le legacy disait « Voir le CV » (fichier public affiché en
+              // ligne) ; notre route sert le fichier en attachment (décision
+              // M4) : « Télécharger » est le verbe exact ici.
               <a
                 href={`/api/files/cv?candidatId=${profil.candidatId}`}
                 className="text-sm font-medium text-brand hover:underline"
               >
-                Télécharger mon CV actuel
+                Télécharger mon CV
               </a>
             )}
           </div>
