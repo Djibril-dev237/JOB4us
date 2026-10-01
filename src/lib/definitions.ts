@@ -174,25 +174,29 @@ export const DISPONIBILITE_VERS_FORM: Record<DisponibilitePrisma, DisponibiliteF
  * - competences bornées à 100 entrées (legacy : sync() non borné).
  */
 export const ProfilCandidatSchema = z.object({
+  // .trim() en tête : le middleware TrimStrings legacy validait sur la
+  // chaîne déjà trimée (ordre des vérifications identique au PHP).
   name: z
     .string()
+    .trim()
     .min(2, { error: 'Le nom doit contenir au moins 2 caractères.' })
-    .max(100)
-    .trim(),
+    .max(100),
   phone: z
     .string()
+    .trim()
     .regex(/^\+?[\d\s\-().]{8,20}$/, { error: 'Numéro de téléphone invalide.' })
     .optional()
     .or(z.literal('')),
-  ville: z.string().max(100, { error: 'La ville ne doit pas dépasser 100 caractères.' }).trim().optional().or(z.literal('')),
+  ville: z.string().trim().max(100, { error: 'La ville ne doit pas dépasser 100 caractères.' }).optional().or(z.literal('')),
   titreProfil: z
     .string()
-    .max(150, { error: 'Le titre ne doit pas dépasser 150 caractères.' })
     .trim()
+    .max(150, { error: 'Le titre ne doit pas dépasser 150 caractères.' })
     .optional()
     .or(z.literal('')),
   resume: z
     .string()
+    .trim()
     .max(10_000, { error: 'Le résumé ne doit pas dépasser 10 000 caractères.' })
     .optional()
     .or(z.literal('')),
@@ -211,6 +215,84 @@ export const ProfilCandidatSchema = z.object({
 })
 
 export type ProfilCandidatFormData = z.infer<typeof ProfilCandidatSchema>
+
+// ─── Schemas Zod — Profil entreprise (M3-ST9) ────────────────────────────────
+
+/**
+ * Valeurs de la liste legacy `taille_entreprise` — validation PHP
+ * `in:1-10,11-50,51-200,201-500,500+` vérifiée dans le contrôleur
+ * EntrepriseController::update, pas supposée.
+ */
+export const TAILLE_ENTREPRISE_FORM = ['1-10', '11-50', '51-200', '201-500', '500+'] as const
+
+/**
+ * Mise à jour du profil Entreprise (M3-ST9) — les 10 champs exacts de
+ * EntrepriseController::update (lue dans le PHP, pas supposés).
+ *
+ * ABSENTS VOLONTAIREMENT (mass-assign) : `logo` (action dédiée uploadLogo),
+ * `isVerified` (colonne réservée à l'admin — le legacy ne l'y touchait pas
+ * non plus), `id`/`userId`/horodatages. Raw construit par clés explicites +
+ * .strip() Zod, politique identique à M1.
+ *
+ * Bornes assumées (durcissements documentés) :
+ * - `description` : legacy sans limite (TEXT 64 Ko) → 10 000 caractères,
+ *   comme le résumé candidat ;
+ * - `site_web` / `adresse` : legacy max:200 mais les colonnes MySQL sans
+ *   @db.VarChar valent VARCHAR(191) chez Prisma → 191 (insérable) ;
+ * - `site_web` : la règle `url` legacy acceptait n'importe quel schéma
+ *   valide — ici http(s) EXCLUSIVEMENT (un `javascript:` stocké deviendrait
+ *   un XSS au clic une fois rendu en lien).
+ */
+export const EntrepriseSchema = z.object({
+  // .trim() en tête, partout : parité exacte du TrimStrings legacy.
+  nom: z
+    .string()
+    .trim()
+    .min(1, { error: "Le nom de l'entreprise est requis." })
+    .max(150, { error: "Le nom ne doit pas dépasser 150 caractères." }),
+  secteurActivite: z
+    .string()
+    .trim()
+    .max(150, { error: "Le secteur ne doit pas dépasser 150 caractères." })
+    .optional()
+    .or(z.literal('')),
+  tailleEntreprise: z.enum(TAILLE_ENTREPRISE_FORM).optional().or(z.literal('')),
+  description: z
+    .string()
+    .trim()
+    .max(10_000, { error: 'La description ne doit pas dépasser 10 000 caractères.' })
+    .optional()
+    .or(z.literal('')),
+  siteWeb: z
+    .url({ error: 'URL de site web invalide.' })
+    .refine((value) => /^https?:\/\//i.test(value), {
+      error: 'Seuls les liens http(s) sont autorisés.',
+    })
+    .or(z.literal(''))
+    .optional(),
+  emailContact: z
+    .email({ error: 'Adresse email de contact invalide.' })
+    .max(150, { error: "L'email ne doit pas dépasser 150 caractères." })
+    .optional()
+    .or(z.literal('')),
+  // Aucun format imposé : la règle legacy `telephone` n'était que max:20.
+  telephone: z
+    .string()
+    .trim()
+    .max(20, { error: 'Le téléphone ne doit pas dépasser 20 caractères.' })
+    .optional()
+    .or(z.literal('')),
+  adresse: z
+    .string()
+    .trim()
+    .max(191, { error: "L'adresse ne doit pas dépasser 191 caractères." })
+    .optional()
+    .or(z.literal('')),
+  ville: z.string().trim().max(100, { error: 'La ville ne doit pas dépasser 100 caractères.' }).optional().or(z.literal('')),
+  pays: z.string().trim().max(100, { error: 'Le pays ne doit pas dépasser 100 caractères.' }).optional().or(z.literal('')),
+})
+
+export type EntrepriseFormData = z.infer<typeof EntrepriseSchema>
 
 // ─── FormState générique pour useActionState ─────────────────────────────────
 

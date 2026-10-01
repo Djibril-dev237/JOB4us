@@ -5,8 +5,10 @@ import { verifyRole, verifySession } from '@/lib/dal'
 import { issuesToErrors, formDataString } from '@/lib/form-errors'
 import {
   DISPONIBILITE_VERS_PRISMA,
+  EntrepriseSchema,
   ProfilCandidatSchema,
   UpdateProfileSchema,
+  type EntrepriseFormData,
   type FormState,
   type ProfilCandidatFormData,
   type UpdateProfileData,
@@ -152,4 +154,68 @@ export async function updateProfilCandidat(
   ])
 
   return { message: 'Profil mis à jour.' }
+}
+
+/**
+ * Mise à jour du profil de l'entreprise du recruteur connecté (M3-ST9).
+ *
+ * SÉCURITÉ :
+ * 1. verifyRole('recruteur') : ni candidat ni admin n'écrivent une entreprise
+ *    (l'admin certifie via son propre espace, jamais ici).
+ * 2. Raw par clés explicites + EntrepriseSchema (.strip()) : `isVerified`,
+ *    `logo`, `userId`, `id`… ne sont ni lus ni écrits.
+ * 3. Écriture UNIQUE (upsert sur l'unique userId) : une seule ligne, pas de
+ *    transaction nécessaire — contrairement au legacy qui faisait
+ *    GET show() = INSERT (effet de bord sur une lecture, non porté) puis
+ *    save() sur update.
+ * 4. `pays` est NOT NULL sans état « vide » : champ vidé = valeur inchangée
+ *    (défaut de colonne « Cameroun » à la création), jamais de null forcé.
+ */
+export async function updateEntreprise(
+  _prevState: FormState<EntrepriseFormData>,
+  formData: FormData,
+): Promise<FormState<EntrepriseFormData>> {
+  const session = await verifyRole('recruteur')
+
+  const raw = {
+    nom: formDataString(formData.get('nom')),
+    secteurActivite: formDataString(formData.get('secteurActivite')),
+    tailleEntreprise: formDataString(formData.get('tailleEntreprise')),
+    description: formDataString(formData.get('description')),
+    siteWeb: formDataString(formData.get('siteWeb')),
+    emailContact: formDataString(formData.get('emailContact')),
+    telephone: formDataString(formData.get('telephone')),
+    adresse: formDataString(formData.get('adresse')),
+    ville: formDataString(formData.get('ville')),
+    pays: formDataString(formData.get('pays')),
+  }
+
+  const parsed = EntrepriseSchema.safeParse(raw)
+  if (!parsed.success) {
+    return { errors: issuesToErrors(parsed.error) }
+  }
+  const data = parsed.data
+
+  const champs = {
+    nom: data.nom,
+    secteurActivite: data.secteurActivite || null,
+    tailleEntreprise: data.tailleEntreprise || null,
+    description: data.description || null,
+    siteWeb: data.siteWeb || null,
+    emailContact: data.emailContact || null,
+    telephone: data.telephone || null,
+    adresse: data.adresse || null,
+    ville: data.ville || null,
+    ...(data.pays ? { pays: data.pays } : {}),
+  }
+
+  await prisma.entreprise.upsert({
+    where: { userId: session.userId },
+    update: champs,
+    // Pas de ligne = création : `nom` vient du formulaire ; `pays` absent
+    // hérite du défaut de colonne (M0), `logo`/`isVerified` de leurs défauts.
+    create: { userId: session.userId, ...champs },
+  })
+
+  return { message: 'Profil entreprise mis à jour avec succès !' }
 }

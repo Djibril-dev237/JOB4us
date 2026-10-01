@@ -21,7 +21,7 @@ export type CvExtension = 'pdf' | 'doc' | 'docx'
 export type ImageExtension = 'jpg' | 'png' | 'webp' | 'gif'
 export type FileExtension = CvExtension | ImageExtension
 
-export type UploadKind = 'cv' | 'avatar'
+export type UploadKind = 'cv' | 'avatar' | 'logo'
 
 export interface DetectedFile {
   extension: FileExtension
@@ -46,6 +46,8 @@ const MIME_BY_EXTENSION: Record<FileExtension, string> = {
 const ALLOWED_BY_KIND: Record<UploadKind, readonly FileExtension[]> = {
   cv: ['pdf', 'doc', 'docx'],
   avatar: ['jpg', 'png', 'webp', 'gif'],
+  // Même liste blanche d'images que l'avatar (SVG refusé, cf. en-tête).
+  logo: ['jpg', 'png', 'webp', 'gif'],
 }
 
 function startsWith(bytes: Uint8Array, signature: readonly number[], offset = 0): boolean {

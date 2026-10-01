@@ -103,3 +103,57 @@ export async function uploadAvatar(
 
   return { message: 'Photo de profil mise à jour.' }
 }
+
+/**
+ * Dépose le logo de l'entreprise du recruteur connecté (M3-ST9).
+ * Même chaîne que l'avatar (validateUpload images 2 Mo, clé UUID, R2
+ * privée, bascule puis suppression de l'ancien objet). Le champ `logo`
+ * n'est LISIBLE nulle part ailleurs : le formulaire de profil entreprise
+ * (EntrepriseSchema) ne l'expose pas (mass-assign impossible).
+ */
+export async function uploadLogo(
+  _prevState: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const session = await verifyRole('recruteur')
+
+  const result = await validateUpload(formDataFile(formData.get('logo')), 'logo')
+  if (!result.ok) {
+    return { errors: { _form: [result.error] } }
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      name: true,
+      entreprise: { select: { id: true, logo: true } },
+    },
+  })
+  if (!user) {
+    return { errors: { _form: ['Compte introuvable.'] } }
+  }
+
+  const key = generateKey('logos', result.file.extension)
+  await putPrivateObject(key, result.bytes, result.file.mime)
+
+  // Bascule AVANT suppression de l'ancien objet (règle 5 de l'en-tête).
+  const logoPrecedent = user.entreprise?.logo ?? null
+  if (user.entreprise) {
+    await prisma.entreprise.update({
+      where: { id: user.entreprise.id },
+      data: { logo: key },
+    })
+  } else {
+    // Ligne absente (compte plus ancien que l'inscription courante) :
+    // création avec le nom du compte, exactement comme le registre legacy
+    // (RegisterController::registered) — JAMAIS depuis un GET.
+    await prisma.entreprise.create({
+      data: { userId: session.userId, nom: user.name, logo: key },
+    })
+  }
+  if (logoPrecedent) {
+    await deleteObject(logoPrecedent)
+  }
+
+  return { message: 'Logo mis à jour.' }
+}
