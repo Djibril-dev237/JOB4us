@@ -101,7 +101,10 @@ export const SELECT_OFFRE_LISTE = {
   niveauExperience: true,
   createdAt: true,
   categorie: { select: { id: true, nom: true } },
-  entreprise: { select: { nom: true, logo: true } },
+  // `id` : indispensable pour construire l'URL publique du logo
+  // (/api/files/logo?entrepriseId=, option B) — la route re-vérifie elle-
+  // même la visibilité, l'id n'est qu'une clé d'appel.
+  entreprise: { select: { id: true, nom: true, logo: true } },
 } satisfies Prisma.OffreSelect
 
 export type OffreCarte = Prisma.OffreGetPayload<{
@@ -122,6 +125,7 @@ export const SELECT_OFFRE_DETAIL = {
   salaireVisible: true,
   entreprise: {
     select: {
+      id: true,
       nom: true,
       logo: true,
       secteurActivite: true,

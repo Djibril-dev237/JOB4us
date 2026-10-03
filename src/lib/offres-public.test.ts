@@ -60,7 +60,7 @@ const CARTE: OffreCarte = {
   niveauExperience: 'junior',
   createdAt: new Date('2026-10-01T09:00:00Z'),
   categorie: { id: 7, nom: 'Informatique' },
-  entreprise: { nom: 'Test Entreprise', logo: 'logos/test.png' },
+  entreprise: { id: 3, nom: 'Test Entreprise', logo: 'logos/test.png' },
 }
 
 // Date figée pour toutes les assertions : mercredi 2026-10-07, 10:00 UTC
@@ -267,10 +267,17 @@ describe('listes blanches (verrou anti-fuite)', () => {
     ]) {
       expect(clefs).not.toContain(interdite)
     }
+    // Entreprise : identité d'affichage + clé d'appel du logo, rien d'autre.
+    expect(SELECT_OFFRE_LISTE.entreprise.select).toEqual({
+      id: true,
+      nom: true,
+      logo: true,
+    })
   })
 
   it('la fiche n’expose ni coordonnées ni compte d’entreprise', () => {
     expect(SELECT_OFFRE_DETAIL.entreprise.select).toEqual({
+      id: true,
       nom: true,
       logo: true,
       secteurActivite: true,
