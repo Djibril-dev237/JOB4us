@@ -57,9 +57,18 @@ import { AutoSubmitOnChange } from './auto-submit'
 //
 // Liens de la task 5 : le titre de chaque carte et le bouton « Voir »
 // pointent vers /offres/<slug> (colonnes verrouillées depuis la task 4).
+// Tasks 6 (SEO/canonical), 7 (cache), 8 (états) et 9 (a11y) livrées.
 //
-// Reste : task 6 (SEO), task 7 (cache), task 8 (états), task 9 (a11y),
-// task 10 (rate limit), task 11 (accueil + clôture).
+// A11y (task 9) : h1 → h2 sur les titres de cartes (pas de saut de niveau,
+// legacy sautait h1 → h6) ; `role="search"` sur le formulaire (repère de
+// recherche pour lecteurs d'écran) ; Précédent/Suivant indisponibles en
+// <button disabled> — `aria-disabled` n'est PAS un attribut global, il est
+// invalide sur un <span> générique ; libellé contextuel sur les liens de
+// page (« Page 2 » contient le texte visible « 2 ») et sur « Voir » ;
+// chip entier cliquable (cible tactile ≥ 24 px, WCAG 2.5.8) ; initiales
+// décoratives en aria-hidden (le nom de l'entreprise est déjà affiché).
+//
+// Reste : task 10 (rate limit), task 11 (accueil + clôture).
 //
 // Aucune donnée privée : select liste blanche (task 1). Requêtes par appel
 // de page : count + page + catégories de filtre = 3 requêtes, AUCUNE par
@@ -118,7 +127,7 @@ export default async function PageOffres({ searchParams }: PageProps<'/offres'>)
       {/* Formulaire GET unique (décision d'étape 3) : le legacy scindait la
           recherche des 3 selects en formulaires multiples reliés par des
           inputs hidden — un seul form supprime cette catégorie de bugs. */}
-      <form action="/offres" method="get">
+      <form action="/offres" method="get" role="search">
         <div className="mt-6 rounded-lg border border-line bg-surface p-4 shadow-card">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div className="relative min-w-0 sm:flex-1">
@@ -225,8 +234,9 @@ export default async function PageOffres({ searchParams }: PageProps<'/offres'>)
           </AutoSubmitOnChange>
 
           {/* Filtres actifs : libellés propres (les artefacts `stage` /
-              `Sans_experience` du blade ne sont pas portés). Le × retire CE
-              paramètre et conserve les autres (parité request()->except()). */}
+              `Sans_experience` du blade ne sont pas portés). Le chip ENTIER
+              est le lien (task 9 : cible tactile ≥ 24 px) et retire CE
+              paramètre en conservant les autres (parité request()->except()). */}
           {filtres.categorie !== undefined ? (
             <ChipFiltre
               texte={categories.find((c) => c.id === filtres.categorie)?.nom ?? ''}
@@ -279,9 +289,13 @@ export default async function PageOffres({ searchParams }: PageProps<'/offres'>)
               Précédent
             </Link>
           ) : (
-            <span aria-disabled="true" className={`${CLASSE_LIEN_PAGE} text-ink-faint`}>
+            <button
+              type="button"
+              disabled
+              className={`${CLASSE_LIEN_PAGE} text-ink-faint disabled:pointer-events-none`}
+            >
               Précédent
-            </span>
+            </button>
           )}
 
           {pagesAffichees(resultat.page, resultat.totalPages).map((item, index) =>
@@ -301,6 +315,7 @@ export default async function PageOffres({ searchParams }: PageProps<'/offres'>)
               <Link
                 key={item}
                 href={construireHref({ ...filtres, page: item })}
+                aria-label={`Page ${item}`}
                 className={`${CLASSE_LIEN_PAGE} min-w-9 justify-center px-0`}
               >
                 {item}
@@ -316,9 +331,13 @@ export default async function PageOffres({ searchParams }: PageProps<'/offres'>)
               Suivant
             </Link>
           ) : (
-            <span aria-disabled="true" className={`${CLASSE_LIEN_PAGE} text-ink-faint`}>
+            <button
+              type="button"
+              disabled
+              className={`${CLASSE_LIEN_PAGE} text-ink-faint disabled:pointer-events-none`}
+            >
               Suivant
-            </span>
+            </button>
           )}
         </nav>
       ) : null}
@@ -339,7 +358,13 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
   return (
     <Card className="transition-shadow duration-fast hover:border-line-strong hover:shadow-lift">
       <div className="flex items-start gap-3">
-        <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-sm font-bold text-brand">
+        {/* Parité stricte : image OU initiales — les deux sont décoratifs
+            (le nom de l'entreprise est affiché juste en dessous), d'où
+            aria-hidden sur le conteneur (task 9). */}
+        <div
+          aria-hidden="true"
+          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-sm font-bold text-brand"
+        >
           {offre.entreprise.logo !== null ? (
             /* eslint-disable-next-line @next/next/no-img-element -- URL publique (option B) : /api/files/logo redirige (302) vers une signature de 5 minutes avec Cache-Control public 300 s — l'optimiseur d'images Next ajouterait un cache intermédiaire et un domaine à déclarer pour un fichier non statique. */
             <img
@@ -355,14 +380,16 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-ink">
+              {/* h2 (task 9) : sous le h1 unique de la page, sans saut de
+                  niveau — le blade partait de h6. */}
+              <h2 className="text-base font-bold text-ink">
                 <Link
                   href={`/offres/${offre.slug}`}
                   className="transition-colors duration-fast hover:text-brand"
                 >
                   {offre.titre}
                 </Link>
-              </h3>
+              </h2>
               <p className="mt-1 text-sm font-medium text-brand">
                 {offre.entreprise.nom}
               </p>
@@ -395,10 +422,14 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
         {/* Parité h6 a href + « Voir » du blade : lien du titre (hover
             primary) et bouton bordé desktop-only (d-none d-md-block →
             hidden md:block). Variante outline-bleue inexistante en tokens
-            M2 → secondary (bordé neutre du design system). */}
+            M2 → secondary (bordé neutre du design system). aria-label
+            contextuel (task 9) : « Voir » seul serait ambigu dans la liste
+            des liens d'un lecteur d'écran, et il CONTIENT le texte visible
+            (WCAG 2.5.3). */}
         <div className="hidden shrink-0 md:block">
           <Link
             href={`/offres/${offre.slug}`}
+            aria-label={`Voir l'offre ${offre.titre}`}
             className={buttonClassName('secondary', 'sm')}
           >
             Voir
@@ -415,21 +446,24 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
 /**
  * Chip de filtre actif (réf. `.filter-active-badge` legacy : fond bleu
  * clair, bordure bleue diluée — `border-brand/20` reproduit le #C7DCFF à
- * partir du seul token brand, aucun hex inventé). Le × est un lien GET qui
- * retire le paramètre courant en conservant tous les autres.
+ * partir du seul token brand, aucun hex inventé). Le lien GET est le chip
+ * ENTIER : la rétention du seul × (icône 12 px) laissait une cible sous
+ * les 24 px de WCAG 2.5.8 — le comportement ne change pas (le clic retire
+ * ce paramètre en conservant tous les autres), seul le pointeur
+ * s'agrandit. aria-label = nom accessible riche (« Retirer le filtre … »
+ * contient le texte visible — WCAG 2.5.3 respecté) ; l'icône × est
+ * decorative (aria-hidden natif, cf. icons.tsx).
  */
 function ChipFiltre({ texte, href }: { texte: string; href: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-brand/20 bg-brand-tint px-2.5 py-1 text-xs font-medium text-brand-dark">
+    <Link
+      href={href}
+      aria-label={`Retirer le filtre ${texte !== '' ? texte : 'catégorie'}`}
+      className="inline-flex items-center gap-1 rounded-full border border-brand/20 bg-brand-tint px-2.5 py-1 text-xs font-medium text-brand-dark transition-colors duration-fast hover:border-brand/40 hover:text-brand-dark"
+    >
       {texte}
-      <Link
-        href={href}
-        aria-label={`Retirer le filtre ${texte !== '' ? texte : 'catégorie'}`}
-        className="text-brand transition-colors duration-fast hover:text-brand-dark"
-      >
-        <IconClose size={12} />
-      </Link>
-    </span>
+      <IconClose size={12} />
+    </Link>
   )
 }
 

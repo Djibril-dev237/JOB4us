@@ -46,8 +46,13 @@ import {
 //
 // Hors périmètre M5 (reporté en M7) : carte de candidature (postuler,
 // sauvegarder, déjà postulé, contacter le recruteur), modal de candidature,
-// détection d'état auth — la fiche M5 est strictement passive. Le SEO
-// (generateMetadata) est la task 6.
+// détection d'état auth — la fiche M5 est strictement passive. Livré :
+// SEO (generateMetadata, task 6), squelette (task 8), a11y (task 9).
+//
+// A11y (task 9) : hiérarchie h1 (titre) → h2 (sections) continue ; les
+// blocs d'initiales sont décoratifs (aria-hidden) — le nom de l'entreprise
+// est toujours affiché à côté/dessous ; le wrapper du h2 « À propos » est
+// un <div> (un <span> ne peut pas contenir de <h2> — contenu phrasing).
 //
 // Requêtes : findFirst (fiche) + findMany (similaires) = 2, aucune par
 // ligne — verrouillé par le test « comptage de requêtes par page ». Cache
@@ -114,7 +119,12 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
           {/* En-tête de l'offre */}
           <Card>
             <div className="flex items-start gap-3">
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-base font-bold text-brand">
+              {/* Décoratif (task 9) : le nom de l'entreprise suit dans
+                  le h1 contexte. */}
+              <div
+                aria-hidden="true"
+                className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-base font-bold text-brand"
+              >
                 {offre.entreprise.logo !== null ? (
                   /* eslint-disable-next-line @next/next/no-img-element -- URL publique (option B) : 302 vers signature 5 minutes, Cache-Control public 300 s — l'optimiseur d'images Next ajouterait un cache non maîtrisé. */
                   <img
@@ -200,8 +210,12 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
                       className="flex items-center gap-3 p-3 transition-colors duration-fast hover:bg-surface-alt"
                     >
                       {/* Parité stricte : la ligne similaire affiche les
-                          initiales au legacy, pas le logo image. */}
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-brand-tint text-xs font-bold text-brand">
+                          initiales au legacy, pas le logo image —
+                          décoratif (task 9), le nom suit dans le texte. */}
+                      <div
+                        aria-hidden="true"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-brand-tint text-xs font-bold text-brand"
+                      >
                         {similaire.entreprise.nom.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
@@ -256,12 +270,15 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
 
           {/* À propos — parité stricte : initiales (pas d'image) au legacy. */}
           <Card className="text-center">
-            <span className="flex">
+            <div className="flex">
               <TitreSection icone={<IconBuilding size={18} />}>
                 À propos de l&apos;entreprise
               </TitreSection>
-            </span>
-            <div className="mx-auto mt-4 flex h-[60px] w-[60px] items-center justify-center rounded-md bg-brand-tint text-base font-bold text-brand">
+            </div>
+            <div
+              aria-hidden="true"
+              className="mx-auto mt-4 flex h-[60px] w-[60px] items-center justify-center rounded-md bg-brand-tint text-base font-bold text-brand"
+            >
               {offre.entreprise.nom.slice(0, 2).toUpperCase()}
             </div>
             <p className="mt-3 font-bold text-ink">{offre.entreprise.nom}</p>
