@@ -87,3 +87,41 @@ export function IconLogout({ size, ...props }: IconProps) {
     </svg>
   )
 }
+
+export function IconBriefcase({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M3 12h18" />
+    </svg>
+  )
+}
+
+export function IconMapPin({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  )
+}
+
+export function IconBarChart({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M5 20v-7" />
+      <path d="M12 20V4" />
+      <path d="M19 20v-11" />
+    </svg>
+  )
+}
+
+export function IconArrowRight({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M4 12h16" />
+      <path d="m13 6 6 6-6 6" />
+    </svg>
+  )
+}

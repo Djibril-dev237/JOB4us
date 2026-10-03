@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import type { NiveauExperience, TypeContrat } from '@prisma/client'
+
 // ─── Rôles ───────────────────────────────────────────────────────────────────
 
 export type Role = 'candidat' | 'recruteur' | 'admin'
@@ -293,6 +295,27 @@ export const EntrepriseSchema = z.object({
 })
 
 export type EntrepriseFormData = z.infer<typeof EntrepriseSchema>
+
+// ─── Libellés d'offres (M5) ───────────────────────────────────────────────────
+// Valeurs des enums Prisma → affichage FR. Les libellés sont empruntés AUX
+// OPTIONS DU SELECT legacy (offres/index.blade.php) : les tags du blade
+// affichaient la valeur brute du champ (« stage », et ucfirst → « Sans_experience »)
+// — artefacts d'affichage non portés (décision M5, parité sur le copy propre).
+
+export const TYPE_CONTRAT_LABELS: Record<TypeContrat, string> = {
+  CDI: 'CDI',
+  CDD: 'CDD',
+  stage: 'Stage',
+  freelance: 'Freelance',
+  temps_partiel: 'Temps partiel',
+}
+
+export const NIVEAU_EXPERIENCE_LABELS: Record<NiveauExperience, string> = {
+  sans_experience: 'Sans expérience',
+  junior: 'Junior',
+  intermediaire: 'Intermédiaire',
+  senior: 'Senior',
+}
 
 // ─── FormState générique pour useActionState ─────────────────────────────────
 
