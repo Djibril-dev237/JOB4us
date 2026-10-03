@@ -48,3 +48,18 @@ describe('confidentialité — annuaire candidats retiré (M3-ST10)', () => {
     expect(hrefsRecruteur).toContain('/recruteur/offres')
   })
 })
+
+// ─── Accès aux offres publiques (M5) ─────────────────────────────────────────
+// La liste /offres (M5, task 2b) doit rester joignable depuis le chrome du
+// site : le visiteur découvre les offres par le header public, sans passer
+// par une URL connue d'avance. Verrouillé ici pour qu'une régression de
+// navigation ne rende pas le module inaccessible.
+
+describe('accès aux offres publiques (M5)', () => {
+  it("le lien « Offres d'emploi » figure dans la navigation publique", () => {
+    expect(PUBLIC_NAV).toContainEqual({
+      label: "Offres d'emploi",
+      href: '/offres',
+    })
+  })
+})
