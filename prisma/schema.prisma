@@ -237,6 +237,9 @@ model Offre {
   vues              Int               @default(0) @db.UnsignedInt
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
+  // URL publique (M5) : « titre-slug-<id> », unique, nullable car ajouté
+  // sur table peuplée (backfill dans la migration) — voir src/lib/slug.ts.
+  slug              String?           @unique @db.VarChar(220)
 
   entreprise        Entreprise        @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
   categorie         Categorie         @relation(fields: [categorieId], references: [id], onDelete: Restrict)
@@ -247,6 +250,10 @@ model Offre {
 
   @@index([categorieId], map: "offres_categorie_id_fkey")
   @@index([entrepriseId], map: "offres_entreprise_id_fkey")
+  // Liste publique M5 : WHERE is_active AND date_expiration >= jour
+  // ORDER BY created_at DESC LIMIT 10 — justification détaillée dans la
+  // migration (parcours inversé de l'index, pas de filesort).
+  @@index([isActive, createdAt, dateExpiration], map: "offres_visibles_liste_idx")
   @@map("offres")
 }
 
