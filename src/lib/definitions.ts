@@ -317,6 +317,59 @@ export const NIVEAU_EXPERIENCE_LABELS: Record<NiveauExperience, string> = {
   senior: 'Senior',
 }
 
+// ─── Filtres de la liste publique des offres (M5, task 3) ────────────────────
+//
+// Schéma de l'URL partageable /offres?q=&ville=&categorie=&type_contrat=
+// &niveau=&page= — noms de paramètres identiques au legacy
+// (OffrePubliqueController@index lit request('type_contrat') et cie).
+// Les tuples ci-dessous reflètent les enums Prisma : un test
+// (definitions.test.ts) verrouille leur égalité avec Object.values(...) du
+// client Prisma — anti-divergence. Aucun import RUNTIME de @prisma/client
+// ici : ce module est aussi importé côté client (le type suffit).
+//
+// Philosophie : paramètre absent, vide ou invalide → FILTRE IGNORÉ, jamais
+// d'erreur. Justification : les selects ne peuvent émettre que des valeurs
+// valides, donc un paramètre invalide vient forcément d'une URL corrompue ;
+// l'ignorer garde l'affichage cohérent (select sur « Toutes » + liste non
+// filtrée) alors que le comparer tel quel produirait 0 résultat avec un
+// select désynchronisé (le legacy where('type_contrat', 'xyz') rendait
+// vide — comportement non reproduit, choix assumé).
+// Les bornes de longueur sont un durcissement d'entrée : q ≤ 200 (colonne
+// titre VarChar(200)), ville ≤ 100 (colonne VarChar(100)) — aucune valeur
+// raisonnable n'est tronquée. `categorie`/`page` passent par Number() :
+// un tableau (paramètre répété) ou un non-numérique → NaN → ignoré.
+
+export const TYPE_CONTRAT_VALUES = [
+  'CDI',
+  'CDD',
+  'stage',
+  'freelance',
+  'temps_partiel',
+] as const
+
+export const NIVEAU_EXPERIENCE_VALUES = [
+  'sans_experience',
+  'junior',
+  'intermediaire',
+  'senior',
+] as const
+
+export const OffresQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200).optional().catch(undefined),
+  ville: z.string().trim().min(1).max(100).optional().catch(undefined),
+  categorie: z.coerce.number().int().min(1).optional().catch(undefined),
+  type_contrat: z.enum(TYPE_CONTRAT_VALUES).optional().catch(undefined),
+  niveau: z.enum(NIVEAU_EXPERIENCE_VALUES).optional().catch(undefined),
+  page: z.coerce.number().int().min(1).optional().catch(1),
+})
+
+/**
+ * Valeurs validées d'une URL /offres : `page` est undefined si absente (le
+ * DAL vaut alors 1) et ramenée à 1 si invalide ; les autres champs sont
+ * undefined quand absents ou invalides.
+ */
+export type OffresQuery = z.infer<typeof OffresQuerySchema>
+
 // ─── FormState générique pour useActionState ─────────────────────────────────
 
 export type FormState<T extends Record<string, unknown> = Record<string, string[]>> =
