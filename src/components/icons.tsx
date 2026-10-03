@@ -125,3 +125,65 @@ export function IconArrowRight({ size, ...props }: IconProps) {
     </svg>
   )
 }
+
+export function IconTag({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2c0 .5.2 1 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z" />
+      <circle cx="7.5" cy="7.5" r="1" />
+    </svg>
+  )
+}
+
+export function IconFileText({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M8 13h8" />
+      <path d="M8 17h5" />
+    </svg>
+  )
+}
+
+export function IconWrench({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" />
+    </svg>
+  )
+}
+
+export function IconGrid({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+    </svg>
+  )
+}
+
+export function IconInfo({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-5" />
+      <path d="M12 8h.01" />
+    </svg>
+  )
+}
+
+export function IconBuilding({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <rect x="4" y="3" width="16" height="18" rx="1" />
+      <path d="M9 8h.01" />
+      <path d="M15 8h.01" />
+      <path d="M9 12h.01" />
+      <path d="M15 12h.01" />
+      <path d="M10 21v-3h4v3" />
+    </svg>
+  )
+}

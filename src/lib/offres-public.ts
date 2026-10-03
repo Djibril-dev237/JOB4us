@@ -3,6 +3,7 @@ import 'server-only'
 import type { NiveauExperience, Prisma, TypeContrat } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { estSlugOffreValide } from '@/lib/slug'
 
 // ─── Couche d'accès aux données PUBLIQUE des offres (M5, task 1) ─────────────
 //
@@ -95,6 +96,10 @@ export function offreVisible(now: Date = new Date()): Prisma.OffreWhereInput {
 export const SELECT_OFFRE_LISTE = {
   id: true,
   titre: true,
+  // URL publique /offres/<slug> (task 5) : liens des cartes, des similaires
+  // et sitemap — le regex d'entrée rejette tout format non généré par
+  // src/lib/slug.ts avant toute requête.
+  slug: true,
   ville: true,
   pays: true,
   typeContrat: true,
@@ -212,6 +217,32 @@ export async function listerOffresPubliques(
   })
 
   return { offres, total, page, totalPages }
+}
+
+/**
+ * Fiche publique d'une offre par son slug (task 5) : renvoie null si le
+ * slug n'existe pas OU si l'offre échoue au prédicat — les deux cas
+ * produisent exactement le même 404 côté page (notFound()), aucune fuite
+ * d'existence (brouillon, expirée, recruteur suspendu, slug legacy
+ * numérique → identiques à une offre absente).
+ *
+ * Garde-fou : le regex du slug rejette toute forme que nos règles n'ont
+ * jamais générée (ancien /offres/<id>, injection, casse) AVANT toute
+ * requête base — un scanner ne coûte aucune requête.
+ *
+ * 1 requête (findFirst avec prédicat), select liste blanche enrichie
+ * (description, dates, salaire, compétences — jamais les coordonnées).
+ */
+export async function lireOffrePublique(
+  slug: string,
+  now: Date = new Date(),
+): Promise<OffreDetail | null> {
+  if (!estSlugOffreValide(slug)) return null
+
+  return prisma.offre.findFirst({
+    where: { AND: [{ slug }, offreVisible(now)] },
+    select: SELECT_OFFRE_DETAIL,
+  })
 }
 
 /**

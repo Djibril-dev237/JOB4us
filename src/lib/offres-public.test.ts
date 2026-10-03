@@ -9,11 +9,13 @@ import {
   SELECT_OFFRE_LISTE,
   dateCouranteDouala,
   entrepriseAOffreVisible,
+  lireOffrePublique,
   listerCategoriesFiltre,
   listerOffresPubliques,
   listerOffresSimilaires,
   offreVisible,
   type OffreCarte,
+  type OffreDetail,
 } from './offres-public'
 
 // ─── Tests de la règle de visibilité publique (M5, task 1) ───────────────────
@@ -36,8 +38,14 @@ interface ArgsCount {
   where?: Prisma.OffreWhereInput
 }
 
-const { offreFindMany, offreCount, categorieFindMany } = vi.hoisted(() => ({
+interface ArgsFindFirst {
+  where?: Prisma.OffreWhereInput
+  select?: Prisma.OffreSelect
+}
+
+const { offreFindMany, offreFindFirst, offreCount, categorieFindMany } = vi.hoisted(() => ({
   offreFindMany: vi.fn<(args: ArgsFindMany) => Promise<OffreCarte[]>>(),
+  offreFindFirst: vi.fn<(args: ArgsFindFirst) => Promise<OffreDetail | null>>(),
   offreCount: vi.fn<(args: ArgsCount) => Promise<number>>(),
   categorieFindMany: vi.fn<
     (args: unknown) => Promise<{ id: number; nom: string }[]>
@@ -46,7 +54,7 @@ const { offreFindMany, offreCount, categorieFindMany } = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    offre: { findMany: offreFindMany, count: offreCount },
+    offre: { findMany: offreFindMany, findFirst: offreFindFirst, count: offreCount },
     categorie: { findMany: categorieFindMany },
   },
 }))
@@ -54,6 +62,7 @@ vi.mock('@/lib/prisma', () => ({
 const CARTE: OffreCarte = {
   id: 42,
   titre: 'Developpeur back-end',
+  slug: 'developpeur-back-end-42',
   ville: 'Douala',
   pays: 'Cameroun',
   typeContrat: 'CDI',
@@ -63,15 +72,35 @@ const CARTE: OffreCarte = {
   entreprise: { id: 3, nom: 'Test Entreprise', logo: 'logos/test.png' },
 }
 
+/** Fiche complète (liste blanche enrichie de la task 5). */
+const FICHE: OffreDetail = {
+  ...CARTE,
+  description: 'Poste en télétravail.\n2 ans d’expérience minimum.',
+  dateExpiration: new Date('2026-12-30T23:00:00Z'),
+  salaireMin: null,
+  salaireMax: null,
+  salaireVisible: false,
+  entreprise: {
+    id: 3,
+    nom: 'Test Entreprise',
+    logo: 'logos/test.png',
+    secteurActivite: 'Informatique',
+    ville: 'Douala',
+  },
+  competences: [{ competence: { nom: 'PHP' } }],
+}
+
 // Date figée pour toutes les assertions : mercredi 2026-10-07, 10:00 UTC
 // = 11:00 à Douala (UTC+1).
 const MAINTENANT = new Date('2026-10-07T10:00:00Z')
 
 beforeEach(() => {
   offreFindMany.mockReset()
+  offreFindFirst.mockReset()
   offreCount.mockReset()
   categorieFindMany.mockReset()
   offreFindMany.mockResolvedValue([CARTE])
+  offreFindFirst.mockResolvedValue(null)
   offreCount.mockResolvedValue(1)
   categorieFindMany.mockResolvedValue([{ id: 7, nom: 'Informatique' }])
 })
@@ -135,6 +164,7 @@ describe('listerOffresPubliques', () => {
       'id',
       'niveauExperience',
       'pays',
+      'slug',
       'titre',
       'typeContrat',
       'ville',
@@ -224,6 +254,40 @@ describe('listerOffresSimilaires', () => {
     ])
     expect(args?.take).toBe(OFFRES_SIMILAIRES_MAX)
     expect(args?.select).toEqual(SELECT_OFFRE_LISTE)
+  })
+})
+
+describe('lireOffrePublique (fiche par slug)', () => {
+  it('rejette tout slug non conforme AVANT toute requête base', async () => {
+    expect(await lireOffrePublique('42', MAINTENANT)).toBeNull()
+    expect(await lireOffrePublique('Developpeur-1', MAINTENANT)).toBeNull()
+    expect(await lireOffrePublique('developpeur-php', MAINTENANT)).toBeNull()
+    expect(await lireOffrePublique('developpeur--php-42', MAINTENANT)).toBeNull()
+
+    expect(offreFindFirst).not.toHaveBeenCalled()
+  })
+
+  it('slug valide sans offre → null, avec le prédicat unique dans le WHERE', async () => {
+    offreFindFirst.mockResolvedValue(null)
+
+    expect(await lireOffrePublique('inexistant-99', MAINTENANT)).toBeNull()
+
+    // Brouillon, expirée, recruteur suspendu ou slug vide d'une offre
+    // masquée : findFirst tombe sur null → notFound() côté page, 404
+    // strictement identique à une offre qui n'existe pas.
+    const args = offreFindFirst.mock.calls[0]?.[0]
+    expect(args?.where?.AND).toEqual([{ slug: 'inexistant-99' }, offreVisible(MAINTENANT)])
+    expect(args?.select).toEqual(SELECT_OFFRE_DETAIL)
+  })
+
+  it('renvoie la fiche complète avec la liste blanche enrichie', async () => {
+    offreFindFirst.mockResolvedValue(FICHE)
+
+    const fiche = await lireOffrePublique('developpeur-back-end-42', MAINTENANT)
+
+    expect(fiche).toEqual(FICHE)
+    expect(fiche?.competences).toEqual([{ competence: { nom: 'PHP' } }])
+    expect(fiche?.description).toContain('télétravail')
   })
 })
 

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 import {
+  IconArrowRight,
   IconBarChart,
   IconBriefcase,
   IconClose,
@@ -27,7 +28,7 @@ import {
 } from '@/lib/offres-public'
 import { AutoSubmitOnChange } from './auto-submit'
 
-// ─── Liste publique des offres (M5, tasks 2 + 3) ─────────────────────────────
+// ─── Liste publique des offres (M5, tasks 2, 3 et 5) ─────────────────────────
 //
 // Rendu SERVEUR : page async + `await searchParams` sous loading.tsx racine.
 // Le spike M5 (bug #98097) a conclu que la règle de suspension M2-M4 n'est
@@ -54,9 +55,11 @@ import { AutoSubmitOnChange } from './auto-submit'
 // tags en valeur brute (`stage`, ucfirst → `Sans_experience`), guard
 // `@if($offre->categorie)` mort (categorieId obligatoire côté Prisma).
 //
-// Reste : task 5 (lien du titre + « Voir » vers /offres/<slug>), task 6
-// (SEO), task 7 (cache), task 8 (états), task 9 (a11y), task 10 (rate
-// limit), task 11 (accueil + clôture).
+// Liens de la task 5 : le titre de chaque carte et le bouton « Voir »
+// pointent vers /offres/<slug> (colonnes verrouillées depuis la task 4).
+//
+// Reste : task 6 (SEO), task 7 (cache), task 8 (états), task 9 (a11y),
+// task 10 (rate limit), task 11 (accueil + clôture).
 //
 // Aucune donnée privée : select liste blanche (task 1). Requêtes par appel
 // de page : count + page + catégories de filtre = 3 requêtes, AUCUNE par
@@ -151,13 +154,13 @@ export default async function PageOffres({ searchParams }: PageProps<'/offres'>)
               Rechercher
             </button>
             {filtreActif ? (
-              <a
+              <Link
                 href="/offres"
                 aria-label="Réinitialiser les filtres"
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-line bg-surface text-ink-muted transition-colors duration-fast hover:border-line-strong hover:text-ink"
               >
                 <IconClose size={16} />
-              </a>
+              </Link>
             ) : null}
           </div>
         </div>
@@ -341,8 +344,14 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              {/* Lien du titre et bouton « Voir » : task 5 (URL /offres/<slug>). */}
-              <h3 className="text-base font-bold text-ink">{offre.titre}</h3>
+              <h3 className="text-base font-bold text-ink">
+                <Link
+                  href={`/offres/${offre.slug}`}
+                  className="transition-colors duration-fast hover:text-brand"
+                >
+                  {offre.titre}
+                </Link>
+              </h3>
               <p className="mt-1 text-sm font-medium text-brand">
                 {offre.entreprise.nom}
               </p>
@@ -371,6 +380,20 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
             <Badge>{offre.categorie.nom}</Badge>
           </div>
         </div>
+
+        {/* Parité h6 a href + « Voir » du blade : lien du titre (hover
+            primary) et bouton bordé desktop-only (d-none d-md-block →
+            hidden md:block). Variante outline-bleue inexistante en tokens
+            M2 → secondary (bordé neutre du design system). */}
+        <div className="hidden shrink-0 md:block">
+          <Link
+            href={`/offres/${offre.slug}`}
+            className={buttonClassName('secondary', 'sm')}
+          >
+            Voir
+            <IconArrowRight size={14} />
+          </Link>
+        </div>
       </div>
     </Card>
   )
@@ -388,13 +411,13 @@ function ChipFiltre({ texte, href }: { texte: string; href: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-brand/20 bg-brand-tint px-2.5 py-1 text-xs font-medium text-brand-dark">
       {texte}
-      <a
+      <Link
         href={href}
         aria-label={`Retirer le filtre ${texte !== '' ? texte : 'catégorie'}`}
         className="text-brand transition-colors duration-fast hover:text-brand-dark"
       >
         <IconClose size={12} />
-      </a>
+      </Link>
     </span>
   )
 }
