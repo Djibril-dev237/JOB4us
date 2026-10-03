@@ -33,6 +33,19 @@ export const LOGIN_MAX_ATTEMPTS_PER_IP = 30
 /** Fenêtre glissante de comptage. */
 export const LOGIN_WINDOW_MS = 5 * 60 * 1_000
 
+// ─── Politique de lecture publique (M5) ──────────────────────────────────────
+//
+// Périmètre : /offres, /offres/<slug>, /sitemap.xml, /api/files/logo —
+// appliqué par src/proxy.ts (Next 16 : middleware.ts → proxy.ts).
+// 120 req/min/IP = 2 req/s soutenues : très au-dessus de tout usage humain
+// (navigation + prefetch), très en deçà d'un automate de scraping.
+
+/** Requêtes max par adresse IP sur le périmètre public M5 par fenêtre. */
+export const OFFRES_MAX_REQUESTS_PER_IP = 120
+
+/** Fenêtre glissante des requêtes publiques M5. */
+export const OFFRES_WINDOW_MS = 60 * 1_000
+
 // ─── Opérations ──────────────────────────────────────────────────────────────
 
 export interface RateLimitResult {
@@ -65,7 +78,11 @@ export function checkRateLimit(key: string, max: number, windowMs: number): Rate
   return { allowed: false, retryAfterMs: Math.max(windowMs - (now - oldest), 1) }
 }
 
-/** Enregistre une tentative échouée. */
+/**
+ * Enregistre une occurrence de la clé. Utilisé par M1 pour les tentatives
+ * de connexion échouées ET par M5 (src/proxy.ts) pour chaque requête
+ * publique — les espaces de clés (`login:*` / `offres:*`) restent disjoints.
+ */
 export function recordAttempt(key: string): void {
   const now = Date.now()
   const bucket = buckets.get(key)

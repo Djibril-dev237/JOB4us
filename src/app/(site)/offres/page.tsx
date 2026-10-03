@@ -57,7 +57,8 @@ import { AutoSubmitOnChange } from './auto-submit'
 //
 // Liens de la task 5 : le titre de chaque carte et le bouton « Voir »
 // pointent vers /offres/<slug> (colonnes verrouillées depuis la task 4).
-// Tasks 6 (SEO/canonical), 7 (cache), 8 (états) et 9 (a11y) livrées.
+// Tasks 6 (SEO/canonical), 7 (cache), 8 (états), 9 (a11y) et 10 (rate
+// limit via src/proxy.ts) livrées.
 //
 // A11y (task 9) : h1 → h2 sur les titres de cartes (pas de saut de niveau,
 // legacy sautait h1 → h6) ; `role="search"` sur le formulaire (repère de
@@ -68,7 +69,7 @@ import { AutoSubmitOnChange } from './auto-submit'
 // chip entier cliquable (cible tactile ≥ 24 px, WCAG 2.5.8) ; initiales
 // décoratives en aria-hidden (le nom de l'entreprise est déjà affiché).
 //
-// Reste : task 10 (rate limit), task 11 (accueil + clôture).
+// Reste : task 11 (accueil + clôture).
 //
 // Aucune donnée privée : select liste blanche (task 1). Requêtes par appel
 // de page : count + page + catégories de filtre = 3 requêtes, AUCUNE par
