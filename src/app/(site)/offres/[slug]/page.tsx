@@ -1,4 +1,6 @@
+import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
+import { cache } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
@@ -63,9 +65,38 @@ const FORMATEUR_MONTANT = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 0,
 })
 
+// Dédoublonnage generateMetadata ↔ page : une SEULE requête findFirst par
+// requête client au lieu de deux (motif React cache documenté par Next).
+// Clé = slug seul : `now` est donc évalué une fois, metadata et corps de
+// page partagent la même frontière d'expiration.
+const lireOffreMiseEnCache = cache(lireOffrePublique)
+
+/**
+ * SEO de la fiche (task 6) : parité stricte avec `@section('title',
+ * $offre->titre)` — titre seul, description héritée du layout racine
+ * (le legacy n'avait ni meta description, ni canonical, ni og:, vérifié
+ * sur layouts/app.blade.php). Canonical : /offres/<slug> est la forme
+ * canonique publiée par la task 4 ; l'entrée legacy /offres/<id> n'a
+ * jamais d'URL canonique (elle 404). Slug non visible → notFound()
+ * aussi ici : même 404 que le corps de page, aucune fuite d'existence
+ * dans le HTML du <head>.
+ */
+export async function generateMetadata({
+  params,
+}: PageProps<'/offres/[slug]'>): Promise<Metadata> {
+  const { slug } = await params
+  const offre = await lireOffreMiseEnCache(slug)
+  if (offre === null) notFound()
+
+  return {
+    title: offre.titre,
+    alternates: { canonical: `/offres/${offre.slug}` },
+  }
+}
+
 export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>) {
   const { slug } = await params
-  const offre = await lireOffrePublique(slug)
+  const offre = await lireOffreMiseEnCache(slug)
   if (offre === null) notFound()
 
   const similaires = await listerOffresSimilaires(offre.categorie.id, offre.id)

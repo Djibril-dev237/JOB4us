@@ -272,6 +272,36 @@ export async function listerOffresSimilaires(
 }
 
 /**
+ * Sitemap (task 6) : slugs des offres visibles — le MÊME prédicat unique
+ * que la liste et les fiches. Le sitemap du legacy n'existe pas (vérifié :
+ * aucune route sitemap/robots côté PHP) ; les critères M5 l'exigent
+ * (« 404 … ET sitemap »), donc seules les offres réellement consultables
+ * y ont une URL : brouillon, expirée ou recruteur suspendu n'y apparaissent
+ * jamais. Sélectif : slug + updatedAt uniquement — aucune donnée
+ * affichable ni personnelle ne transite par le sitemap.
+ *
+ * Pas de pagination : le protocole sitemap autorise 50 000 URL/message et
+ * le volume d'offres publiées reste très loin en dessous. `slug: not null`
+ * exclut les lignes sans slug de la base (colonne nullable héritée de la
+ * migration legacy — le backfill de la task 4 remplit pourtant tout), et
+ * le prédicat TS est indispensable : Prisma ne rétrécit PAS le type via
+ * ce filtre, sans lui le strict faiblirait sur `string | null`
+ * (sinon : /offres/null dans le sitemap).
+ */
+export async function slugsOffresVisibles(
+  now: Date = new Date(),
+): Promise<Array<{ slug: string; updatedAt: Date }>> {
+  const offres = await prisma.offre.findMany({
+    where: { AND: [offreVisible(now), { slug: { not: null } }] },
+    select: { slug: true, updatedAt: true },
+    orderBy: { createdAt: 'desc' },
+  })
+  return offres.filter(
+    (offre): offre is { slug: string; updatedAt: Date } => offre.slug !== null,
+  )
+}
+
+/**
  * Catégories du formulaire de filtre : TOUTES les catégories, tri alpha,
  * comme `Categorie::orderBy('nom')->get()` legacy. Une option de filtre
  * vide n'est pas une affirmation de contenu (contrairement aux cartes de

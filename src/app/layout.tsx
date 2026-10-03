@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 
 import { Header } from "@/components/layout/header";
+import { SITE_URL } from "@/lib/site-url";
 import "./globals.css";
 
 const inter = Inter({
@@ -11,6 +12,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  // Base des URL absolues (canonical des pages /offres, sitemap) —
+  // env existante M1, aucun domaine inventé (cf. src/lib/site-url.ts).
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "Job4Us : offres d'emploi et recrutement au Cameroun",
     template: "%s | Job4Us",

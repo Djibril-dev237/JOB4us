@@ -66,7 +66,14 @@ import { AutoSubmitOnChange } from './auto-submit'
 // ligne (pas de N+1).
 // ---------------------------------------------------------------------------
 
-export const metadata: Metadata = { title: "Offres d'emploi" }
+// Canonical : TOUTES les variantes d'URL (q, ville, filtres, page) pointent
+// vers /offres — anti-duplicata standard des recherches filtrées, les
+// résultats pertinents restent accessibles (la page reste dynamique et
+// partageable, seul le signal SEO se normalise).
+export const metadata: Metadata = {
+  title: "Offres d'emploi",
+  alternates: { canonical: '/offres' },
+}
 
 export default async function PageOffres({ searchParams }: PageProps<'/offres'>) {
   // Tous les champs du schéma rattrapent leur invalide (`.catch`) : la seule

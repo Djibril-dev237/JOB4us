@@ -14,6 +14,7 @@ import {
   listerOffresPubliques,
   listerOffresSimilaires,
   offreVisible,
+  slugsOffresVisibles,
   type OffreCarte,
   type OffreDetail,
 } from './offres-public'
@@ -43,8 +44,12 @@ interface ArgsFindFirst {
   select?: Prisma.OffreSelect
 }
 
+// Le type de retour dépend du `select` appelé (cartes de liste, fiche,
+// sitemap) : le mock reste volontairement `unknown` — les garanties se
+// lisent sur les ARGS (select/where/orderBy) et sur les types de retour
+// des fonctions de la DAL, eux stricts.
 const { offreFindMany, offreFindFirst, offreCount, categorieFindMany } = vi.hoisted(() => ({
-  offreFindMany: vi.fn<(args: ArgsFindMany) => Promise<OffreCarte[]>>(),
+  offreFindMany: vi.fn<(args: ArgsFindMany) => Promise<unknown>>(),
   offreFindFirst: vi.fn<(args: ArgsFindFirst) => Promise<OffreDetail | null>>(),
   offreCount: vi.fn<(args: ArgsCount) => Promise<number>>(),
   categorieFindMany: vi.fn<
@@ -288,6 +293,37 @@ describe('lireOffrePublique (fiche par slug)', () => {
     expect(fiche).toEqual(FICHE)
     expect(fiche?.competences).toEqual([{ competence: { nom: 'PHP' } }])
     expect(fiche?.description).toContain('télétravail')
+  })
+})
+
+describe('slugsOffresVisibles (sitemap)', () => {
+  it('publie sous le prédicat unique, sélectif slug + updatedAt seulement', async () => {
+    const miseAJour = new Date('2026-10-02T10:00:00Z')
+    offreFindMany.mockResolvedValue([
+      { slug: 'developpeur-back-end-1', updatedAt: miseAJour },
+    ])
+
+    const slugs = await slugsOffresVisibles(MAINTENANT)
+
+    const args = offreFindMany.mock.calls[0]?.[0]
+    expect(args?.where?.AND).toEqual([
+      offreVisible(MAINTENANT),
+      { slug: { not: null } },
+    ])
+    expect(args?.select).toEqual({ slug: true, updatedAt: true })
+    expect(args?.orderBy).toEqual({ createdAt: 'desc' })
+    expect(slugs).toEqual([
+      { slug: 'developpeur-back-end-1', updatedAt: miseAJour },
+    ])
+  })
+
+  it('une offre invisible ne produit aucune entrée de sitemap', async () => {
+    // Brouillon/expirée : findMany filtré par offreVisible() ne renvoie
+    // rien → sitemap sans cette URL, conformément au critère « 404 …
+    // ET sitemap ».
+    offreFindMany.mockResolvedValue([])
+
+    expect(await slugsOffresVisibles(MAINTENANT)).toEqual([])
   })
 })
 
