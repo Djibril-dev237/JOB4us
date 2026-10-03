@@ -22,7 +22,20 @@ import { SITE_URL } from '@/lib/site-url'
 // Pas de priorité/changeFrequency : ce sont des hints que le legacy n'a
 // jamais émis et dont l'effet réel est débattu — on ne code pas d'opinion
 // SEO invérifiable, on publie les URL vraies avec leur lastModified réel.
+//
+// Task 7 (cache) : un `sitemap.js` est un Route Handler CACHÉ PAR DÉFAUT
+// (doc Next : « cached by default unless it uses a Request-time API or
+// dynamic config ») — sans cela, la liste serait figée au build : une
+// offre publiée après le build n'y apparaîtrait JAMAIS et une offre
+// expirée y resterait INDÉFINIMENT, ce qui viole le critère M5
+// « expirée → 404 (URL directe ET sitemap) ». Coût assumé : une requête
+// findMany indexée (quelques lignes) par passage de robot — dérisoire,
+// et le build n'a plus besoin d'accéder à la base pour ce fichier.
+// Aucun cache de résultat sur les pages non plus : la fraîcheur de la
+// règle de visibilité prime sur un gain microscopique.
 // ---------------------------------------------------------------------------
+
+export const dynamic = 'force-dynamic'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const offres = await slugsOffresVisibles()

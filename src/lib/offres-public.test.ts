@@ -327,6 +327,34 @@ describe('slugsOffresVisibles (sitemap)', () => {
   })
 })
 
+describe('comptage de requêtes par page (task 7)', () => {
+  it('page liste = 3 requêtes planifiées, jamais une par offre', async () => {
+    await listerOffresPubliques({ page: 1 })
+    await listerCategoriesFiltre()
+
+    expect(offreCount).toHaveBeenCalledTimes(1)
+    expect(offreFindMany).toHaveBeenCalledTimes(1)
+    expect(categorieFindMany).toHaveBeenCalledTimes(1)
+    expect(offreFindFirst).not.toHaveBeenCalled()
+  })
+
+  it('page fiche = 2 requêtes (fiche + similaires), zéro par ligne affichée', async () => {
+    offreFindFirst.mockResolvedValue(FICHE)
+
+    const offre = await lireOffrePublique('developpeur-back-end-42', MAINTENANT)
+    const similaires =
+      offre !== null
+        ? await listerOffresSimilaires(offre.categorie.id, offre.id, MAINTENANT)
+        : []
+
+    expect(similaires).toBeDefined()
+    expect(offreFindFirst).toHaveBeenCalledTimes(1)
+    expect(offreFindMany).toHaveBeenCalledTimes(1)
+    expect(offreCount).not.toHaveBeenCalled()
+    expect(categorieFindMany).not.toHaveBeenCalled()
+  })
+})
+
 describe('listerCategoriesFiltre', () => {
   it('renvoie toutes les catégories en alpha, sans autre champ', async () => {
     const categories = await listerCategoriesFiltre()

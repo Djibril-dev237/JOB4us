@@ -49,7 +49,12 @@ import {
 // détection d'état auth — la fiche M5 est strictement passive. Le SEO
 // (generateMetadata) est la task 6.
 //
-// Requêtes : findFirst (fiche) + findMany (similaires) = 2, aucune par ligne.
+// Requêtes : findFirst (fiche) + findMany (similaires) = 2, aucune par
+// ligne — verrouillé par le test « comptage de requêtes par page ». Cache
+// (task 7) : dédoublonnage INTRA-requête via React cache() entre
+// generateMetadata et la page (une seule requête pour les deux, cf.
+// lireOffreMiseEnCache) ; aucun cache de résultat entre requêtes — une
+// offre devenue invisible doit 404 immédiatement.
 // ---------------------------------------------------------------------------
 
 /** Dates publiques figées sur le fuseau de la cible (choix M5, cf. DAL). */

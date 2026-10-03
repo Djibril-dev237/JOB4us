@@ -63,7 +63,11 @@ import { AutoSubmitOnChange } from './auto-submit'
 //
 // Aucune donnée privée : select liste blanche (task 1). Requêtes par appel
 // de page : count + page + catégories de filtre = 3 requêtes, AUCUNE par
-// ligne (pas de N+1).
+// ligne (pas de N+1) — verrouillé par le test « comptage de requêtes par
+// page ». Pas de cache de résultat ici (task 7) : /offres est rendu à chaque
+// requête (searchParams) et mettrait en liste des offres expirées ou
+// cacherait des offres fraîchement publiées — la fraîcheur de la règle de
+// visibilité prime sur 3 requêtes indexées sans coût.
 // ---------------------------------------------------------------------------
 
 // Canonical : TOUTES les variantes d'URL (q, ville, filtres, page) pointent
