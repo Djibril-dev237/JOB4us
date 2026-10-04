@@ -14,6 +14,7 @@ import {
   listerOffresPubliques,
   listerOffresSimilaires,
   offreVisible,
+  slugOffreVisible,
   slugsOffresVisibles,
   type OffreCarte,
   type OffreDetail,
@@ -293,6 +294,44 @@ describe('lireOffrePublique (fiche par slug)', () => {
     expect(fiche).toEqual(FICHE)
     expect(fiche?.competences).toEqual([{ competence: { nom: 'PHP' } }])
     expect(fiche?.description).toContain('télétravail')
+  })
+})
+
+describe('slugOffreVisible (contrôle pré-streaming du proxy)', () => {
+  it('slug non conforme → false SANS requête base', async () => {
+    // URL legacy /offres/42, casse interdite, slug vide : le regex de
+    // src/lib/slug.ts tranche avant toute requête — un scanner ne coûte
+    // rien (prescription « keep proxy checks fast » de la doc Next).
+    expect(await slugOffreVisible('42', MAINTENANT)).toBe(false)
+    expect(await slugOffreVisible('Developpeur-1', MAINTENANT)).toBe(false)
+    expect(await slugOffreVisible('developpeur--php-42', MAINTENANT)).toBe(false)
+    expect(await slugOffreVisible('', MAINTENANT)).toBe(false)
+
+    expect(offreFindFirst).not.toHaveBeenCalled()
+  })
+
+  it('slug sans offre visible → false, prédicat unique et select id seul', async () => {
+    // Brouillon, expirée, recruteur suspendu ou simple absence : le
+    // proxy reçoit exactement la même réponse false → rewrite 404,
+    // aucun distinguo entre les causes (anti-fuite identique au 404
+    // de la page).
+    expect(await slugOffreVisible('developpeur-php-5', MAINTENANT)).toBe(false)
+
+    const args = offreFindFirst.mock.calls[0]?.[0]
+    expect(offreFindFirst).toHaveBeenCalledTimes(1)
+    expect(args?.where?.AND).toEqual([
+      { slug: 'developpeur-php-5' },
+      offreVisible(MAINTENANT),
+    ])
+    expect(args?.select).toEqual({ id: true })
+  })
+
+  it('offre visible → true (le proxy laisse le rendu se faire)', async () => {
+    offreFindFirst.mockResolvedValue(FICHE)
+
+    expect(await slugOffreVisible('developpeur-back-end-42', MAINTENANT)).toBe(
+      true,
+    )
   })
 })
 

@@ -11,7 +11,8 @@ import { estSlugOffreValide } from '@/lib/slug'
 // explicite (liste blanche de l'étape 2) : jamais d'objet Offre complet
 // sérialisé. C'est la SOURCE UNIQUE de la règle « quelle offre est
 // visible » (étape 2 validée) : liste, similaires, catégories, compteur
-// d'accueil et (via les adaptateurs) le sitemap l'utilisent.
+// d'accueil et (via les adaptateurs) le sitemap l'utilisent — de même
+// que le contrôle 404 pré-streaming du proxy (task 10b).
 //
 // Décisions validées (étape 2) qui se matérialisent ici :
 // 1. recruteur actif : `entreprise.user.isActive = true` (fail-closed —
@@ -243,6 +244,41 @@ export async function lireOffrePublique(
     where: { AND: [{ slug }, offreVisible(now)] },
     select: SELECT_OFFRE_DETAIL,
   })
+}
+
+/**
+ * Contrôle pré-streaming du proxy (task 10b) : ce slug renvoie-t-il une
+ * offre visible ? Même prédicat unique que la page, mais sélectif `id`
+ * seulement — jamais de contenu (doc proxy : « keep proxy checks fast,
+ * and avoid fetching full content there »).
+ *
+ * Pourquoi cette fonction existe : en Next 16, `notFound()` appelé par la
+ * PAGE répond TOUJOURS 200 — le corps stream démarre avant que la page
+ * ait résolu sa requête base (doc not-found.js : « 200 for streamed
+ * responses, 404 for non-streamed »), que le squelette loading.tsx soit
+ * présent ou non et que notFound() soit synchrone (les deux variantes
+ * mesurées → 200). Seul le ROUTING sur une URL non appariée pose un 404
+ * strict ; le proxy s'exécute avant tout rendu (étape 3 de l'ordre
+ * d'exécution Next), donc c'est lui qui doit déclencher ce routing via
+ * un rewrite — prescription littérale de loading.md §Status codes :
+ * « run this check in proxy to rewrite missing slugs to a not-found
+ * route ».
+ *
+ * Le regex d'entrée est repris ici (et non seulement côté page) : une
+ * URL legacy /offres/42 ou injectée ne coûte AUCUNE requête base.
+ * Coût : 1 requête indexée (slug unique) par contrôle.
+ */
+export async function slugOffreVisible(
+  slug: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  if (!estSlugOffreValide(slug)) return false
+
+  const offre = await prisma.offre.findFirst({
+    where: { AND: [{ slug }, offreVisible(now)] },
+    select: { id: true },
+  })
+  return offre !== null
 }
 
 /**
