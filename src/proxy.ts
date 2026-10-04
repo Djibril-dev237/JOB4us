@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+import { slugOffreVisible } from '@/lib/offres-public'
 import {
   OFFRES_MAX_REQUESTS_PER_IP,
   OFFRES_WINDOW_MS,
@@ -50,6 +51,42 @@ import {
 // pipeline de tokens M2 — couleurs système par défaut, AUCUNE couleur
 // inventée), JSON `{ error }` pour les API, au format des autres erreurs
 // du projet.
+//
+// ─── 404 réel des fiches invisibles (task 10b, validé en fin M5) ─────────────
+//
+// Critère M5 : « brouillon/expirée/supprimée → 404 » sur URL directe.
+// Mesure de validation : en Next 16, `notFound()` de la PAGE répond
+// TOUJOURS 200 (corps not-found + noindex injecté) — le stream démarre
+// avant la résolution de la page (doc not-found.js : « 200 for streamed
+// responses, 404 for non-streamed »), que le squelette loading.tsx soit
+// présent ou non et que notFound() soit synchrone (les trois variantes
+// mesurées → 200 ; seul le noindex protège le SEO). Seules les URL non
+// appariées, où le ROUTING tranche avant tout rendu, retournent 404
+// strict.
+//
+// Prescription officielle (loading.md §Status codes) : « ensure the
+// resource exists before the response body is streamed … run this check
+// in proxy to rewrite missing slugs to a not-found route ». Le proxy est
+// l'étape 3 de l'exécution Next (routes = étape 5) : aucun octet n'a été
+// engagé au moment du contrôle, le 404 est donc ferme.
+//
+// Déroulé : rate limit D'ABORD (il protège aussi la base) → GET/HEAD sur
+// /offres/<slug> uniquement → slugOffreVisible (regex non conforme = 0
+// requête ; sinon 1 requête `id` avec le prédicat unique) → absent ou
+// invisible → rewrite vers /404 (URL volontairement sans route) →
+// routing non apparié → 404 strict du not-found M2, l'URL d'origine
+// reste affichée dans le navigateur.
+//
+// La PAGE garde son propre notFound() (défense en profondeur : si ce
+// contrôle saute un jour, la page affiche quand même le même not-found) :
+// si une offre expire entre le contrôle et le rendu (fenêtre de quelques
+// ms), le visiteur reçoit le not-found en 200 noindex — course
+// documentée, non éliminable sans sacrifier le streaming.
+//
+// Coût : +1 requête indexée par fiche consultée, bornée à 120/min/IP par
+// le rate limit ci-dessus. Fail-open sans IP conservé : le contrôle 404
+// s'exécute aussi quand aucune IP n'est exploitable (il n'appartient pas
+// au rate limit).
 // ---------------------------------------------------------------------------
 
 /**
@@ -102,16 +139,43 @@ function reponseTropDeRequetes(
   )
 }
 
-export function proxy(request: NextRequest): NextResponse | undefined {
+/**
+ * Contrôle de visibilité AVANT rendu (task 10b) : neutre en dehors des
+ * GET/HEAD de fiche ; rewrite vers `/404` (URL volontairement sans
+ * route) quand le slug est absent, expiré, brouillon, recruteur suspendu
+ * ou non conforme — le routing pose alors le 404 strict, mécanisme
+ * identique à toute URL inconnue, sans dupliquer l'UI d'état.
+ */
+async function controlerFichePublique(
+  request: NextRequest,
+): Promise<NextResponse | undefined> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return undefined
+
+  const correspondance = /^\/offres\/([^/]+)\/?$/.exec(request.nextUrl.pathname)
+  if (correspondance === null) return undefined
+
+  const slug = correspondance[1] ?? ''
+  if (await slugOffreVisible(slug)) return undefined
+
+  return NextResponse.rewrite(new URL('/404', request.url))
+}
+
+export async function proxy(
+  request: NextRequest,
+): Promise<NextResponse | undefined> {
   const ip = extraireIp(request)
-  if (ip === null) return undefined
+  if (ip !== null) {
+    const cle = `offres:ip:${ip}`
+    const verif = checkRateLimit(
+      cle,
+      OFFRES_MAX_REQUESTS_PER_IP,
+      OFFRES_WINDOW_MS,
+    )
+    if (!verif.allowed) return reponseTropDeRequetes(request, verif.retryAfterMs)
+    recordAttempt(cle)
+  }
 
-  const cle = `offres:ip:${ip}`
-  const verif = checkRateLimit(cle, OFFRES_MAX_REQUESTS_PER_IP, OFFRES_WINDOW_MS)
-  if (!verif.allowed) return reponseTropDeRequetes(request, verif.retryAfterMs)
-
-  recordAttempt(cle)
-  return undefined
+  return controlerFichePublique(request)
 }
 
 export const config = {
