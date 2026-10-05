@@ -123,7 +123,7 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
                   le h1 contexte. */}
               <div
                 aria-hidden="true"
-                className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-base font-bold text-brand"
+                className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-base font-bold text-brand-dark"
               >
                 {offre.entreprise.logo !== null ? (
                   /* eslint-disable-next-line @next/next/no-img-element -- URL publique (option B) : 302 vers signature 5 minutes, Cache-Control public 300 s — l'optimiseur d'images Next ajouterait un cache non maîtrisé. */
@@ -214,7 +214,7 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
                           décoratif (task 9), le nom suit dans le texte. */}
                       <div
                         aria-hidden="true"
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-brand-tint text-xs font-bold text-brand"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-brand-tint text-xs font-bold text-brand-dark"
                       >
                         {similaire.entreprise.nom.slice(0, 2).toUpperCase()}
                       </div>
@@ -277,7 +277,7 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
             </div>
             <div
               aria-hidden="true"
-              className="mx-auto mt-4 flex h-[60px] w-[60px] items-center justify-center rounded-md bg-brand-tint text-base font-bold text-brand"
+              className="mx-auto mt-4 flex h-[60px] w-[60px] items-center justify-center rounded-md bg-brand-tint text-base font-bold text-brand-dark"
             >
               {offre.entreprise.nom.slice(0, 2).toUpperCase()}
             </div>

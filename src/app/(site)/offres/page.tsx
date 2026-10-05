@@ -58,7 +58,8 @@ import { AutoSubmitOnChange } from './auto-submit'
 // Liens de la task 5 : le titre de chaque carte et le bouton « Voir »
 // pointent vers /offres/<slug> (colonnes verrouillées depuis la task 4).
 // Tasks 6 (SEO/canonical), 7 (cache), 8 (états), 9 (a11y) et 10 (rate
-// limit via src/proxy.ts) livrées.
+// limit + 404 pré-streaming des fiches invisibles via src/proxy.ts)
+// livrées ; task 11 (entrée /offres dans la navigation) clôturée.
 //
 // A11y (task 9) : h1 → h2 sur les titres de cartes (pas de saut de niveau,
 // legacy sautait h1 → h6) ; `role="search"` sur le formulaire (repère de
@@ -68,8 +69,6 @@ import { AutoSubmitOnChange } from './auto-submit'
 // page (« Page 2 » contient le texte visible « 2 ») et sur « Voir » ;
 // chip entier cliquable (cible tactile ≥ 24 px, WCAG 2.5.8) ; initiales
 // décoratives en aria-hidden (le nom de l'entreprise est déjà affiché).
-//
-// Reste : task 11 (accueil + clôture).
 //
 // Aucune donnée privée : select liste blanche (task 1). Requêtes par appel
 // de page : count + page + catégories de filtre = 3 requêtes, AUCUNE par
@@ -364,7 +363,7 @@ function CarteOffre({ offre }: { offre: OffreCarte }) {
             aria-hidden sur le conteneur (task 9). */}
         <div
           aria-hidden="true"
-          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-sm font-bold text-brand"
+          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-sm font-bold text-brand-dark"
         >
           {offre.entreprise.logo !== null ? (
             /* eslint-disable-next-line @next/next/no-img-element -- URL publique (option B) : /api/files/logo redirige (302) vers une signature de 5 minutes avec Cache-Control public 300 s — l'optimiseur d'images Next ajouterait un cache intermédiaire et un domaine à déclarer pour un fichier non statique. */
