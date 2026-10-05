@@ -80,7 +80,8 @@ describe('GET /api/files/logo — visiteur (option B)', () => {
     expect(offreCount.mock.calls[0]?.[0].where).toMatchObject({
       AND: [
         {
-          isActive: true,
+          statut: 'publiee',
+          deletedAt: null,
           entreprise: { user: { isActive: true } },
         },
         { entrepriseId: 3 },

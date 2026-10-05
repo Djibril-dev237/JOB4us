@@ -134,9 +134,12 @@ describe('dateCouranteDouala', () => {
 })
 
 describe('offreVisible (prédicat unique)', () => {
-  it('exige publication, expiration non passée ET compte recruteur actif', () => {
+  it('exige publication, non-suppression, expiration non passée ET compte recruteur actif', () => {
     expect(offreVisible(MAINTENANT)).toEqual({
-      isActive: true,
+      // M6 : statut enum + suppression logique (jamais isActive — colonne
+      // supprimée par la migration m6_statuts_offres_suppression_logique).
+      statut: 'publiee',
+      deletedAt: null,
       // Minuit civil à Douala (UTC+1) = 23:00Z la veille : le jour
       // d'expiration est inclus jusqu'à la fin de la journée locale.
       dateExpiration: { gte: new Date('2026-10-06T23:00:00.000Z') },

@@ -233,7 +233,13 @@ model Offre {
   salaireMax        Decimal?          @map("salaire_max") @db.Decimal(10, 2)
   salaireVisible    Boolean           @default(false) @map("salaire_visible")
   dateExpiration    DateTime          @map("date_expiration") @db.Date
-  isActive          Boolean           @default(true) @map("is_active")
+  // Cycle de vie M6 (étape 2 validée) : 4 statuts stockés (l'ancien
+  // booléen is_active, qui fusionnait brouillon et suspension, est
+  // supprimé) — voir enum StatutOffre + migration m6.
+  statut            StatutOffre       @default(brouillon)
+  // Suppression LOGIQUE M6 (étape 2) : jamais de delete physique —
+  // candidatures.offre_id est en cascade, l'historique M7 doit survivre.
+  deletedAt         DateTime?         @map("deleted_at")
   vues              Int               @default(0) @db.UnsignedInt
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
@@ -250,10 +256,12 @@ model Offre {
 
   @@index([categorieId], map: "offres_categorie_id_fkey")
   @@index([entrepriseId], map: "offres_entreprise_id_fkey")
-  // Liste publique M5 : WHERE is_active AND date_expiration >= jour
-  // ORDER BY created_at DESC LIMIT 10 — justification détaillée dans la
-  // migration (parcours inversé de l'index, pas de filesort).
-  @@index([isActive, createdAt, dateExpiration], map: "offres_visibles_liste_idx")
+  // Liste publique M5 : WHERE statut='publiee' AND deleted_at IS NULL
+  // AND date_expiration >= jour ORDER BY created_at DESC LIMIT 10 —
+  // statut en tête (égalité très sélective, ex-booléen is_active),
+  // created_at en second pour le tri sans filesort ; justification
+  // détaillée dans la migration (parcours inversé de l'index).
+  @@index([statut, createdAt, dateExpiration], map: "offres_visibles_liste_idx")
   @@map("offres")
 }
 
@@ -281,6 +289,19 @@ enum TypeContrat {
   temps_partiel
 
   @@map("offres_type_contrat")
+}
+
+// Cycle de vie d'une offre (M6 étape 2) : les transitions autorisées sont
+// vérifiées côté serveur (compare-and-set) — « expirée » et « supprimée »
+// ne sont PAS des statuts : la première est dérivée de dateExpiration à
+// chaque lecture (aucun cron), la seconde vit dans deletedAt.
+enum StatutOffre {
+  brouillon
+  publiee
+  cloturee
+  suspendue
+
+  @@map("offres_statut")
 }
 
 enum NiveauExperience {

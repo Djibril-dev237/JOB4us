@@ -33,10 +33,13 @@ import { estSlugOffreValide } from '@/lib/slug'
 // 4. les compteurs/catégories de l'accueil sont alignés sur ce même
 //    prédicat : une seule vérité, deux lignes au lieu de deux variantes.
 //
-// Le statut « publié » du legacy est le simple booléen `isActive` :
-// brouillon du recruteur et suspension admin partagent la même valeur
-// false et reçoivent le même 404 — distinguer les deux demandera un enum
-// en M6 (hors périmètre M5).
+// Cycle de vie M6 (étape 2 validée) : le booléen `isActive`, qui
+// fusionnait brouillon et suspension, a été remplacé par l'enum
+// StatutOffre + la colonne `deletedAt` (suppression logique). Le prédicat
+// ci-dessous exige `statut = 'publiee'` ET `deletedAt IS NULL` —
+// brouillon, clôturée, suspendue, supprimée reçoivent exactement le même
+// 404 qu'une offre inexistante. « Expirée » reste DÉRIVÉE (comparaison de
+// date à chaque lecture), jamais stockée : aucun cron, aucune écriture.
 // ---------------------------------------------------------------------------
 
 /** Fuseau de la cible (Cameroun) : toute date publique s'y réfère. */
@@ -78,14 +81,16 @@ function minuitDouala(civil: string): Date {
 // ─── Prédicat unique de visibilité (matrice de tests) ────────────────────────
 
 /**
- * OFFRE VISIBLE = publiée (isActive) AND non expirée (jour d'expiration
- * inclus) AND recruteur actif. Toute offre qui échoue — ou qui n'existe
- * pas — produit exactement le même 404, sans exception (aucune fuite
- * d'existence vers propriétaire ou admin sur les routes publiques).
+ * OFFRE VISIBLE = publiée (statut) AND non supprimée (deletedAt) AND non
+ * expirée (jour d'expiration inclus) AND recruteur actif. Toute offre qui
+ * échoue — ou qui n'existe pas — produit exactement le même 404, sans
+ * exception (aucune fuite d'existence vers propriétaire ou admin sur les
+ * routes publiques).
  */
 export function offreVisible(now: Date = new Date()): Prisma.OffreWhereInput {
   return {
-    isActive: true,
+    statut: 'publiee',
+    deletedAt: null,
     dateExpiration: { gte: minuitDouala(dateCouranteDouala(now)) },
     entreprise: { user: { isActive: true } },
   }
