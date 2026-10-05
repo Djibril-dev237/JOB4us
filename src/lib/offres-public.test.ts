@@ -7,7 +7,6 @@ import {
   OFFRES_SIMILAIRES_MAX,
   SELECT_OFFRE_DETAIL,
   SELECT_OFFRE_LISTE,
-  dateCouranteDouala,
   entrepriseAOffreVisible,
   lireOffrePublique,
   listerCategoriesFiltre,
@@ -109,28 +108,6 @@ beforeEach(() => {
   offreFindFirst.mockResolvedValue(null)
   offreCount.mockResolvedValue(1)
   categorieFindMany.mockResolvedValue([{ id: 7, nom: 'Informatique' }])
-})
-
-describe('dateCouranteDouala', () => {
-  it('borne les dates sur le fuseau du pays et pas sur celui du serveur', () => {
-    // 22:30Z = 23:30 à Douala : toujours le 2 octobre.
-    expect(dateCouranteDouala(new Date('2026-10-02T22:30:00Z'))).toBe(
-      '2026-10-02',
-    )
-    // 23:30Z = 00:30 à Douala : déjà le 3 octobre.
-    expect(dateCouranteDouala(new Date('2026-10-02T23:30:00Z'))).toBe(
-      '2026-10-03',
-    )
-    // Fin de journée locale : 22:59Z = 23:59 à Douala (toujours le 7) ;
-    // 23:00Z = minuit à Douala → déjà le 8. La bascule est exactement
-    // sur le minuit local, pas sur minuit UTC.
-    expect(dateCouranteDouala(new Date('2026-10-07T22:59:00Z'))).toBe(
-      '2026-10-07',
-    )
-    expect(dateCouranteDouala(new Date('2026-10-07T23:00:00Z'))).toBe(
-      '2026-10-08',
-    )
-  })
 })
 
 describe('offreVisible (prédicat unique)', () => {

@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { NiveauExperience, Prisma, TypeContrat } from '@prisma/client'
 
+import { dateCouranteDouala, minuitDouala } from '@/lib/douala'
 import { prisma } from '@/lib/prisma'
 import { estSlugOffreValide } from '@/lib/slug'
 
@@ -27,7 +28,8 @@ import { estSlugOffreValide } from '@/lib/slug'
 //    ISO-8601 DateTime »), et l'instant Douala donne le même résultat
 //    que le minuit UTC tout en survivant à une éventuelle conversion de
 //    fuseau côté session MySQL (contrôlé sur la base de dev : offre
-//    expirant aujourd'hui incluse, offre expirée exclue) ;
+//    expirant aujourd'hui incluse, offre expirée exclue) — helpers extraits
+//    en M6/P2 dans src/lib/douala.ts (partagés avec l'affichage de statut) ;
 // 3. entreprise non vérifiée : reste visible (`isVerified` est un badge,
 //    jamais un gate — parité legacy) ;
 // 4. les compteurs/catégories de l'accueil sont alignés sur ce même
@@ -42,41 +44,11 @@ import { estSlugOffreValide } from '@/lib/slug'
 // date à chaque lecture), jamais stockée : aucun cron, aucune écriture.
 // ---------------------------------------------------------------------------
 
-/** Fuseau de la cible (Cameroun) : toute date publique s'y réfère. */
-const FUSEAU_OFFRES = 'Africa/Douala'
-
 /** Pagination : 10 par page, identique au `paginate(10)` legacy. */
 export const OFFRES_PAR_PAGE = 10
 
 /** Nombre maximal d'offres similaires sur une fiche (legacy : `limit(4)`). */
 export const OFFRES_SIMILAIRES_MAX = 4
-
-const FORMATEUR_JOUR = new Intl.DateTimeFormat('en-CA', {
-  timeZone: FUSEAU_OFFRES,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
-
-/**
- * Date du jour au Cameroun, en clair ('YYYY-MM-DD').
- * Sert de base au prédicat de visibilité : le jour est calculé sur le
- * fuseau de la cible, jamais sur celui du serveur applicatif.
- */
-export function dateCouranteDouala(now: Date = new Date()): string {
-  return FORMATEUR_JOUR.format(now)
-}
-
-/**
- * Minuit civil à Douala exprimé comme instant UTC (le Cameroun est en
- * UTC+1 sans DST : décalage constant). Utilisé tel quel dans le filtre
- * `dateExpiration.gte` — forme acceptée par Prisma (contrairement à la
- * date en clair) et vérifiée comme « jour inclus » contre MySQL.
- */
-function minuitDouala(civil: string): Date {
-  const [annee, mois, jour] = civil.split('-').map(Number)
-  return new Date(Date.UTC(annee, mois - 1, jour) - 3_600_000)
-}
 
 // ─── Prédicat unique de visibilité (matrice de tests) ────────────────────────
 
