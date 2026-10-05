@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { decode } from 'next-auth/jwt'
 
+import type { Role } from '@/lib/definitions'
 import { slugOffreVisible } from '@/lib/offres-public'
 import {
   OFFRES_MAX_REQUESTS_PER_IP,
@@ -9,85 +11,97 @@ import {
   recordAttempt,
 } from '@/lib/rate-limit'
 
-// ─── Rate limit du périmètre public M5 (task 10) ─────────────────────────────
+// ─── Proxy à trois couches (P0 M6 : fusion M1 + M5) ──────────────────────────
 //
-// Convention Next 16 : le fichier `middleware.ts` est DÉPRÉCIÉ et renommé
-// `proxy.ts` (doc officielle : « Middleware is deprecated and renamed to
-// Proxy », v16.0.0) — export `proxy` + config.matcher, runtime Node par
-// défaut (aucun réglage requis).
+// Convention Next 16 : `middleware.ts` est DÉPRÉCIÉ et renommé `proxy.ts`
+// (doc officielle : « Middleware is deprecated and renamed to Proxy »,
+// v16.0.0) — export `proxy` + config.matcher, runtime Node par défaut.
 //
-// Périmètre couvert (matcher plus bas) : pages /offres, fiche /offres/<slug>,
-// /sitemap.xml et /api/files/logo — les quatre points d'entrée qui
-// déclenchent des requêtes base côté public. Les endpoints /api/home/* (M2)
-// sont HORS périmètre : leurs en-têtes `public, max-age=60, s-maxage=60`
-// déjà livrés absorbent l'origine côté CDN.
+// COUCHE 1 — Rate limit du périmètre public (M5 task 10) :
+// 120 req/min/IP sur les points d'entrée publics qui déclenchent des
+// requêtes base (/offres, fiche /offres/<slug>, /sitemap.xml,
+// /api/files/logo). Il ne s'applique PLUS à tout le matcher : les
+// espaces connectés (/recruteur…) ont leur propre budget de session et
+// n'ont jamais eu de limite en M1 — un recruteur qui navigue ne doit
+// pas épuiser le seau public partagé (et inversement). Store : celui de
+// M1 (src/lib/rate-limit.ts, fenêtre glissante en mémoire, périmètre
+// monoprocessus déjà documenté là-bas). Les clés `offres:ip:*` restent
+// disjointes de `login:*`. IP : x-forwarded-for puis x-real-ip ;
+// fail-open sans IP (documenté en M5 : sans en-tête identifiable, un
+// seau unique auto-DOSerait tous les clients en dev direct).
+// Réponse 429 : Retry-After + page HTML minimaliste noindex (navigateurs)
+// ou JSON `{ error }` (API), au format des autres erreurs du projet.
 //
-// Store : celui de M1 (src/lib/rate-limit.ts, fenêtre glissante en mémoire,
-// périmètre monoprocessus déjà documenté là-bas). Les clés `offres:ip:*`
-// sont disjointes des clés `login:*` : aucun croisement de budget entre la
-// connexion et la lecture publique. Le store ne vit QUE dans ce proxy pour
-// ces clés — la mise en garde de la doc Next (« ne pas reposer sur des
-// modules/globaux partagés entre proxy et rendu ») est donc respectée : le
-// proxy et les pages ne coordonnent rien.
+// COUCHE 2 — Gate par rôle, contrôle OPTIMISTE (M1, restauré en M6 P0) :
+// lecture du cookie JWT Auth.js sans base, redirections rapides
+// /login (visiteur) et /unauthorized (rôle insuffisant), + redirection
+// /login→/ pour un connecté. RESTAURÉ car le commit M5 `7a4aade` avait
+// réécrit ce fichier en entier et perdu cette couche (diagnostic M6
+// addendum : les pages du groupe (app) sont synchrones et s'appuyaient
+// dessus, aucune ne rappelle verifyRole au rendu). Le contrôle
+// AUTORITAIRE reste le DAL (verifySession/verifyRole/getCurrentUser,
+// dal.ts) exécuté dans chaque page/action protégée — ce proxy n'est que
+// la redirection confort. Politique : rejet explicite, jamais de silence,
+// y compris pour un admin sur un espace métier qui n'est pas le sien.
 //
-// IP : même extraction que M1 (x-forwarded-for, puis x-real-ip). DIVERGENCE
-// assumée face au `'local'` de M1 : sans en-tête identifiable, on ne
-// limite PAS (fail-open). Chez M1, un compte partagé `'local'` à 5
-// tentatives reste défendable ; ici, un seau unique à 120 req/min pour
-// tous les clients sans en-tête permettrait à UN visiteur d'épuiser le
-// budget de TOUS les autres (auto-DoS) — et en dev direct (aucun proxy),
-// aucun en-tête n'existe, ce qui casserait la validation navigateur.
-// Modèle de confiance : x-forwarded-for n'est fiable que derrière un
-// proxy qui le RÉÉCRIT (Vercel, Cloudflare, nginx avec proxy_set_header) ;
-// en exposition directe, un client peut le falsifier (contourner ou
-// épuiser un seau d'autrui). Risque accepté et documenté, identique à M1 :
-// le plafond reste dissuasif et la protection est pleinement correcte
-// derrière le proxy de déploiement.
+// COUCHE 3 — 404 pré-streaming des fiches (M5 task 10b) :
+// en Next 16, `notFound()` de la PAGE répond TOUJOURS 200 (corps stream
+// démarré avant la résolution — doc not-found.js « 200 for streamed
+// responses ») ; seul le ROUTING sur une URL non appariée pose 404
+// strict. D'où : GET/HEAD /offres/<slug> → slugOffreVisible (regex en
+// entrée = 0 requête si non conforme) → absent/invisible → rewrite vers
+// /404 (URL sans route) → 404 strict du not-found M2, URL d'origine
+// conservée. Prescription : loading.md §Status codes « run this check in
+// proxy to rewrite missing slugs to a not-found route ». La PAGE garde
+// son propre notFound() en défense (course documentée, non éliminable
+// sans sacrifier le streaming).
 //
-// Budget : 120 requêtes/min/IP sur TOUT le périmètre — 2 requêtes/s
-// soutenues, très au-dessus de tout usage humain (navigation + prefetch),
-// très en deçà d'un automate de scraping (pages/s). Réponse : 429 +
-// Retry-After ; page HTML minimaliste pour les navigateurs (noindex, hors
-// pipeline de tokens M2 — couleurs système par défaut, AUCUNE couleur
-// inventée), JSON `{ error }` pour les API, au format des autres erreurs
-// du projet.
-//
-// ─── 404 réel des fiches invisibles (task 10b, validé en fin M5) ─────────────
-//
-// Critère M5 : « brouillon/expirée/supprimée → 404 » sur URL directe.
-// Mesure de validation : en Next 16, `notFound()` de la PAGE répond
-// TOUJOURS 200 (corps not-found + noindex injecté) — le stream démarre
-// avant la résolution de la page (doc not-found.js : « 200 for streamed
-// responses, 404 for non-streamed »), que le squelette loading.tsx soit
-// présent ou non et que notFound() soit synchrone (les trois variantes
-// mesurées → 200 ; seul le noindex protège le SEO). Seules les URL non
-// appariées, où le ROUTING tranche avant tout rendu, retournent 404
-// strict.
-//
-// Prescription officielle (loading.md §Status codes) : « ensure the
-// resource exists before the response body is streamed … run this check
-// in proxy to rewrite missing slugs to a not-found route ». Le proxy est
-// l'étape 3 de l'exécution Next (routes = étape 5) : aucun octet n'a été
-// engagé au moment du contrôle, le 404 est donc ferme.
-//
-// Déroulé : rate limit D'ABORD (il protège aussi la base) → GET/HEAD sur
-// /offres/<slug> uniquement → slugOffreVisible (regex non conforme = 0
-// requête ; sinon 1 requête `id` avec le prédicat unique) → absent ou
-// invisible → rewrite vers /404 (URL volontairement sans route) →
-// routing non apparié → 404 strict du not-found M2, l'URL d'origine
-// reste affichée dans le navigateur.
-//
-// La PAGE garde son propre notFound() (défense en profondeur : si ce
-// contrôle saute un jour, la page affiche quand même le même not-found) :
-// si une offre expire entre le contrôle et le rendu (fenêtre de quelques
-// ms), le visiteur reçoit le not-found en 200 noindex — course
-// documentée, non éliminable sans sacrifier le streaming.
-//
-// Coût : +1 requête indexée par fiche consultée, bornée à 120/min/IP par
-// le rate limit ci-dessus. Fail-open sans IP conservé : le contrôle 404
-// s'exécute aussi quand aucune IP n'est exploitable (il n'appartient pas
-// au rate limit).
+// ORDRE : rate limit d'abord (il protège aussi la base) → contrôle 404
+// sur le périmètre public ; gate par rôle sur les espaces connectés
+// (domaines disjoints — aucun croisement possible). Le décodage JWT
+// n'a lieu QUE sur les chemins de gate : un visiteur sur /offres ne paie
+// aucun coût de décodage.
 // ---------------------------------------------------------------------------
+
+// ─── Couche 2 : routes protégées (optimistic check, héritage M1) ─────────────
+// Chemins repris de legacy_laravel/routes/web.php (groupes middleware
+// auth + candidat / recruteur / admin). Toute nouvelle route protégée
+// doit être ajoutée ICI et surtout appeler le DAL côté rendu.
+
+const ROLE_ROUTES: { prefix: string; roles: Role[] }[] = [
+  { prefix: '/candidat', roles: ['candidat'] },
+  { prefix: '/recruteur', roles: ['recruteur'] },
+  { prefix: '/admin', roles: ['admin'] },
+]
+
+/** Routes ouvertes à tout utilisateur connecté (legacy : middleware auth seul). */
+const AUTH_ROUTES = ['/messages', '/notifications', '/parametres']
+
+function correspondPrefixe(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`)
+}
+
+/** Pages d'authentification : un connecté est renvoyé à l'accueil. */
+function estPageAuth(pathname: string): boolean {
+  return pathname === '/login' || pathname === '/register'
+}
+
+// ─── Couche 1 : périmètre public soumis au rate limit ────────────────────────
+
+/**
+ * Même étendue que le matcher M5 (`/offres/:path*`, `/sitemap.xml`,
+ * `/api/files/logo`) : le budget `offres:ip:*` ne touche jamais les
+ * espaces connectés. `startsWith('/offres/')` (et non `startsWith`) pour
+ * ne pas attraper un chemin tel que /offres-ancien.
+ */
+function estPerimetrePublic(pathname: string): boolean {
+  return (
+    pathname === '/offres' ||
+    pathname.startsWith('/offres/') ||
+    pathname === '/sitemap.xml' ||
+    pathname === '/api/files/logo'
+  )
+}
 
 /**
  * Adresse IP du client. `null` = aucune identité exploitable → fail-open
@@ -139,13 +153,75 @@ function reponseTropDeRequetes(
   )
 }
 
+// ─── Couche 2 : lecture du cookie de session Auth.js ─────────────────────────
+
+interface SessionProxy {
+  userId: number
+  role: Role
+}
+
+async function lireSession(request: NextRequest): Promise<SessionProxy | null> {
+  const cookie =
+    request.cookies.get('authjs.session-token') ??
+    request.cookies.get('__Secure-authjs.session-token')
+  if (!cookie) return null
+
+  const secret = process.env.AUTH_SECRET
+  if (!secret) return null
+
+  try {
+    // salt = nom exact du cookie (dérivation de clé Auth.js).
+    const payload = await decode({ token: cookie.value, secret, salt: cookie.name })
+    const userId = payload?.userId
+    const role = payload?.role
+
+    if (typeof userId !== 'number') return null
+    if (role !== 'candidat' && role !== 'recruteur' && role !== 'admin') return null
+    return { userId, role }
+  } catch {
+    // Cookie absent, expiré, altéré ou révoqué : non connecté.
+    return null
+  }
+}
+
 /**
- * Contrôle de visibilité AVANT rendu (task 10b) : neutre en dehors des
- * GET/HEAD de fiche ; rewrite vers `/404` (URL volontairement sans
- * route) quand le slug est absent, expiré, brouillon, recruteur suspendu
- * ou non conforme — le routing pose alors le 404 strict, mécanisme
- * identique à toute URL inconnue, sans dupliquer l'UI d'état.
+ * Gate optimiste : aucune requête base, décodage JWT seul. Redirections
+ * /login (visiteur), /unauthorized (rôle insuffisant), / (connecté sur
+ * une page d'auth). `undefined` = chemin hors gate → couche suivante.
  */
+async function controlerAccesEspace(
+  request: NextRequest,
+): Promise<NextResponse | undefined> {
+  const { pathname } = request.nextUrl
+  const routeRole = ROLE_ROUTES.find((route) => correspondPrefixe(pathname, route.prefix))
+  const authSeul = AUTH_ROUTES.some((route) => correspondPrefixe(pathname, route))
+  const pageAuth = estPageAuth(pathname)
+  if (routeRole === undefined && !authSeul && !pageAuth) return undefined
+
+  const session = await lireSession(request)
+
+  if (pageAuth) {
+    return session !== null
+      ? NextResponse.redirect(new URL('/', request.url))
+      : undefined
+  }
+
+  // Non connecté → page de connexion.
+  if (session === null) return NextResponse.redirect(new URL('/login', request.url))
+
+  // Rôle insuffisant → page d'accès refusé (politique : rejet explicite).
+  if (routeRole !== undefined && !routeRole.roles.includes(session.role)) {
+    return NextResponse.redirect(new URL('/unauthorized', request.url))
+  }
+
+  return NextResponse.next()
+}
+
+// ─── Couche 3 : contrôle de visibilité AVANT rendu (M5 task 10b) ─────────────
+// Neutre en dehors des GET/HEAD de fiche ; rewrite vers `/404` (URL
+// volontairement sans route) quand le slug est absent, expiré, brouillon,
+// recruteur suspendu ou non conforme — le routing pose alors le 404
+// strict, mécanisme identique à toute URL inconnue.
 async function controlerFichePublique(
   request: NextRequest,
 ): Promise<NextResponse | undefined> {
@@ -160,24 +236,47 @@ async function controlerFichePublique(
   return NextResponse.rewrite(new URL('/404', request.url))
 }
 
+// ─── Proxy ───────────────────────────────────────────────────────────────────
+
 export async function proxy(
   request: NextRequest,
 ): Promise<NextResponse | undefined> {
-  const ip = extraireIp(request)
-  if (ip !== null) {
-    const cle = `offres:ip:${ip}`
-    const verif = checkRateLimit(
-      cle,
-      OFFRES_MAX_REQUESTS_PER_IP,
-      OFFRES_WINDOW_MS,
-    )
-    if (!verif.allowed) return reponseTropDeRequetes(request, verif.retryAfterMs)
-    recordAttempt(cle)
+  // Périmètre public : rate limit d'abord (il protège aussi la base),
+  // puis 404 pré-streaming des fiches.
+  if (estPerimetrePublic(request.nextUrl.pathname)) {
+    const ip = extraireIp(request)
+    if (ip !== null) {
+      const cle = `offres:ip:${ip}`
+      const verif = checkRateLimit(
+        cle,
+        OFFRES_MAX_REQUESTS_PER_IP,
+        OFFRES_WINDOW_MS,
+      )
+      if (!verif.allowed) return reponseTropDeRequetes(request, verif.retryAfterMs)
+      recordAttempt(cle)
+    }
+    return controlerFichePublique(request)
   }
 
-  return controlerFichePublique(request)
+  // Espaces connectés : gate par rôle optimiste (aucun coût sur le
+  // périmètre public ci-dessus — domaines disjoints).
+  return controlerAccesEspace(request)
 }
 
 export const config = {
-  matcher: ['/offres/:path*', '/sitemap.xml', '/api/files/logo'],
+  matcher: [
+    // Périmètre public M5 (rate limit + 404 fiches).
+    '/offres/:path*',
+    '/sitemap.xml',
+    '/api/files/logo',
+    // Espaces connectés M1 (gate par rôle, restauré en M6 P0).
+    '/login',
+    '/register',
+    '/candidat/:path*',
+    '/recruteur/:path*',
+    '/admin/:path*',
+    '/messages/:path*',
+    '/notifications/:path*',
+    '/parametres/:path*',
+  ],
 }

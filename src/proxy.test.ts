@@ -20,12 +20,25 @@ import { config, proxy } from './proxy'
 // rewrite) ; la règle de visibilité derrière ce booléen est verrouillée
 // par offres-public.test.ts, et le 404 HTTP strict par la validation
 // HTTP/navigateur (routing non apparié en aval du rewrite).
+//
+// ─── Gate par rôle (P0 M6, restauré) ─────────────────────────────────────────
+//
+// `decode` (next-auth/jwt) est mocké : le gate ne lit QUE le cookie, le
+// décodage réel est couvert par Auth.js. Le secret doit exister pour que
+// lireSession descende jusqu'à decode — forcé en début de fichier.
+// Chaque scénario de rôle part d'une requête neuve (pas d'état partagé).
 
-const { slugOffreVisible } = vi.hoisted(() => ({
+const { slugOffreVisible, decode } = vi.hoisted(() => ({
   slugOffreVisible: vi.fn<(slug: string) => Promise<boolean>>(),
+  decode: vi.fn<(args: unknown) => Promise<Record<string, unknown> | null>>(),
 }))
 
 vi.mock('@/lib/offres-public', () => ({ slugOffreVisible }))
+vi.mock('next-auth/jwt', () => ({ decode }))
+
+// Présence du secret : sinon lireSession s'arrête avant decode et tous
+// les scénarios « connecté » dériveraient silencieusement en visiteur.
+process.env.AUTH_SECRET ??= 'secret-de-test'
 
 function requete(chemin: string, ip?: string, accept = '*/*'): NextRequest {
   const entetes: Record<string, string> = { accept }
@@ -33,17 +46,34 @@ function requete(chemin: string, ip?: string, accept = '*/*'): NextRequest {
   return new NextRequest(`http://localhost:3000${chemin}`, { headers: entetes })
 }
 
+/** Requête portant (ou non) le cookie de session Auth.js. */
+function requeteAvecSession(chemin: string, connecte = true): NextRequest {
+  const entetes: Record<string, string> = { accept: '*/*' }
+  if (connecte) entetes['cookie'] = 'authjs.session-token=jeton-de-test'
+  return new NextRequest(`http://localhost:3000${chemin}`, { headers: entetes })
+}
+
 beforeEach(() => {
   slugOffreVisible.mockReset()
   slugOffreVisible.mockResolvedValue(true)
+  decode.mockReset()
+  decode.mockResolvedValue(null)
 })
 
 describe('proxy M5 (rate limit)', () => {
-  it('couvre /offres, le sitemap et l’API logo — rien d’autre', () => {
+  it('couvre le périmètre public M5 et les espaces connectés M1', () => {
     expect(config.matcher).toEqual([
       '/offres/:path*',
       '/sitemap.xml',
       '/api/files/logo',
+      '/login',
+      '/register',
+      '/candidat/:path*',
+      '/recruteur/:path*',
+      '/admin/:path*',
+      '/messages/:path*',
+      '/notifications/:path*',
+      '/parametres/:path*',
     ])
   })
 
@@ -172,5 +202,114 @@ describe('proxy M5 (404 pré-streaming des fiches)', () => {
       await proxy(requete('/api/files/logo?entrepriseId=1')),
     ).toBeUndefined()
     expect(slugOffreVisible).not.toHaveBeenCalled()
+  })
+})
+
+describe('proxy M6 (gate par rôle restauré — P0)', () => {
+  function connecte(role: 'candidat' | 'recruteur' | 'admin', userId = 7): void {
+    decode.mockResolvedValue({ userId, role })
+  }
+
+  it('envoie un visiteur à /login depuis chaque espace protégé', async () => {
+    for (const chemin of [
+      '/recruteur/offres',
+      '/candidat/profil',
+      '/admin/dashboard',
+      '/messages',
+      '/notifications',
+      '/parametres',
+    ]) {
+      const reponse = await proxy(requeteAvecSession(chemin, false))
+      expect(reponse?.status).toBe(307)
+      expect(reponse?.headers.get('location')).toBe(
+        'http://localhost:3000/login',
+      )
+      expect(decode).not.toHaveBeenCalled() // pas de cookie = pas de décodage
+    }
+  })
+
+  it('refuse le bon rôle sur l’espace d’un autre par /unauthorized', async () => {
+    connecte('candidat')
+    expect(
+      (await proxy(requeteAvecSession('/recruteur/offres')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/unauthorized')
+
+    connecte('recruteur')
+    expect(
+      (await proxy(requeteAvecSession('/candidat/profil')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/unauthorized')
+
+    // Parité legacy : ['auth','recruteur'] strict — un admin n’entre pas
+    // dans l’espace recruteur (idem test api/entreprise « admin = 403 »).
+    connecte('admin')
+    expect(
+      (await proxy(requeteAvecSession('/recruteur/offres')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/unauthorized')
+  })
+
+  it('laisse passer un connecté sur son propre espace (x-middleware-next)', async () => {
+    connecte('recruteur')
+    const reponseRecruteur = await proxy(requeteAvecSession('/recruteur/offres'))
+    expect(reponseRecruteur?.headers.get('x-middleware-next')).toBe('1')
+
+    connecte('admin')
+    const reponseAdmin = await proxy(requeteAvecSession('/admin/dashboard'))
+    expect(reponseAdmin?.headers.get('x-middleware-next')).toBe('1')
+  })
+
+  it('traite un jeton altéré comme un visiteur (déchiffrement échoué)', async () => {
+    decode.mockRejectedValue(new Error('signature invalide'))
+
+    const reponse = await proxy(requeteAvecSession('/recruteur/offres'))
+    expect(reponse?.headers.get('location')).toBe('http://localhost:3000/login')
+  })
+
+  it('refuse un rôle absent ou inconnu dans le payload', async () => {
+    decode.mockResolvedValue({ userId: 7 }) // aucun rôle
+    expect(
+      (await proxy(requeteAvecSession('/recruteur/offres')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/login')
+
+    decode.mockResolvedValue({ userId: 7, role: 'super-admin' })
+    expect(
+      (await proxy(requeteAvecSession('/recruteur/offres')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/login')
+  })
+
+  it('redirige un connecté de /login et /register vers l’accueil', async () => {
+    connecte('candidat')
+    expect(
+      (await proxy(requeteAvecSession('/login')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/')
+    expect(
+      (await proxy(requeteAvecSession('/register')))?.headers.get('location'),
+    ).toBe('http://localhost:3000/')
+
+    // Visiteur sur /login : aucune redirection (page publique).
+    expect(await proxy(requeteAvecSession('/login', false))).toBeUndefined()
+  })
+
+  it('n’applique pas le budget public aux espaces connectés', async () => {
+    // Épuise le seau public sur cette IP…
+    const ip = '203.0.113.60'
+    for (let i = 0; i < OFFRES_MAX_REQUESTS_PER_IP; i++) {
+      expect(await proxy(requete('/offres', ip))).toBeUndefined()
+    }
+    expect((await proxy(requete('/offres', ip)))?.status).toBe(429)
+
+    // …le même IP reste servie sur /recruteur : redirection de rôle,
+    // jamais 429 (les clés offres:ip:* ne s’appliquent pas ici).
+    connecte('recruteur')
+    const reponse = await proxy(
+      new NextRequest('http://localhost:3000/recruteur/offres', {
+        headers: {
+          accept: '*/*',
+          'x-forwarded-for': ip,
+          cookie: 'authjs.session-token=jeton-de-test',
+        },
+      }),
+    )
+    expect(reponse?.headers.get('x-middleware-next')).toBe('1')
+    expect(reponse?.status).not.toBe(429)
   })
 })
