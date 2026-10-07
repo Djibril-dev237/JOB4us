@@ -27,13 +27,25 @@ import { config, proxy } from './proxy'
 // décodage réel est couvert par Auth.js. Le secret doit exister pour que
 // lireSession descende jusqu'à decode — forcé en début de fichier.
 // Chaque scénario de rôle part d'une requête neuve (pas d'état partagé).
+//
+// ─── 404 pré-streaming de la gestion (M6, couche 4) ──────────────────────────
+//
+// `entrepriseDuCompte` + `lireOffreGestion` (DAL) sont mockés : ces tests
+// verrouillent le DÉROULÉ (décision du gate → ownership → cible du
+// rewrite) et le fail-closed (segment inconnu / id hors domaine → 404
+// sans base) ; la règle d'ownership derrière est verrouillie par
+// offres-dal.test.ts, et le 404 HTTP strict par la validation finale.
 
-const { slugOffreVisible, decode } = vi.hoisted(() => ({
-  slugOffreVisible: vi.fn<(slug: string) => Promise<boolean>>(),
-  decode: vi.fn<(args: unknown) => Promise<Record<string, unknown> | null>>(),
-}))
+const { slugOffreVisible, decode, entrepriseDuCompte, lireOffreGestion } =
+  vi.hoisted(() => ({
+    slugOffreVisible: vi.fn<(slug: string) => Promise<boolean>>(),
+    decode: vi.fn<(args: unknown) => Promise<Record<string, unknown> | null>>(),
+    entrepriseDuCompte: vi.fn<(userId: number) => Promise<number | null>>(),
+    lireOffreGestion: vi.fn<(offreId: number, entrepriseId: number) => Promise<unknown>>(),
+  }))
 
 vi.mock('@/lib/offres-public', () => ({ slugOffreVisible }))
+vi.mock('@/lib/offres-dal', () => ({ entrepriseDuCompte, lireOffreGestion }))
 vi.mock('next-auth/jwt', () => ({ decode }))
 
 // Présence du secret : sinon lireSession s'arrête avant decode et tous
@@ -58,6 +70,12 @@ beforeEach(() => {
   slugOffreVisible.mockResolvedValue(true)
   decode.mockReset()
   decode.mockResolvedValue(null)
+  // Recruteur de test : entreprise 3, offre 12 la sienne. Chaque scénario
+  // de la couche 4 précise ses exceptions.
+  entrepriseDuCompte.mockReset()
+  entrepriseDuCompte.mockResolvedValue(3)
+  lireOffreGestion.mockReset()
+  lireOffreGestion.mockResolvedValue({ id: 12 })
 })
 
 describe('proxy M5 (rate limit)', () => {
@@ -311,5 +329,118 @@ describe('proxy M6 (gate par rôle restauré — P0)', () => {
     )
     expect(reponse?.headers.get('x-middleware-next')).toBe('1')
     expect(reponse?.status).not.toBe(429)
+  })
+})
+
+describe('proxy M6 (404 pré-streaming de la gestion — couche 4)', () => {
+  function recruteurConnecte(userId = 7): void {
+    decode.mockResolvedValue({ userId, role: 'recruteur' })
+  }
+
+  it('laisse passer l’offre du recruteur : ownership en une requête', async () => {
+    recruteurConnecte()
+
+    const reponse = await proxy(requeteAvecSession('/recruteur/offres/12'))
+
+    expect(reponse?.headers.get('x-middleware-next')).toBe('1')
+    expect(entrepriseDuCompte).toHaveBeenCalledTimes(1)
+    expect(entrepriseDuCompte).toHaveBeenCalledWith(7)
+    expect(lireOffreGestion).toHaveBeenCalledTimes(1)
+    expect(lireOffreGestion).toHaveBeenCalledWith(12, 3)
+  })
+
+  it('réécrit vers /404 l’offre étrangère, supprimée ou inexistante', async () => {
+    recruteurConnecte()
+    // Étrangère, supprimée et inexistante : la DAL renvoie le même null
+    // (même `where`) — un seul scénario verrouille les trois cas.
+    lireOffreGestion.mockResolvedValue(null)
+
+    for (const chemin of ['/recruteur/offres/12', '/recruteur/offres/12/editer']) {
+      const reponse = await proxy(requeteAvecSession(chemin))
+      expect(reponse?.status).toBe(200)
+      expect(reponse?.headers.get('x-middleware-rewrite')).toBe(
+        'http://localhost:3000/404',
+      )
+    }
+  })
+
+  it('blanchit la création et laisse les autres routes de l’espace', async () => {
+    recruteurConnecte()
+
+    for (const chemin of ['/recruteur/offres', '/recruteur/offres/creer', '/recruteur/dashboard']) {
+      const reponse = await proxy(requeteAvecSession(chemin))
+      expect(reponse?.headers.get('x-middleware-next')).toBe('1')
+    }
+    expect(entrepriseDuCompte).not.toHaveBeenCalled()
+    expect(lireOffreGestion).not.toHaveBeenCalled()
+  })
+
+  it('réécrit sans base tout segment d’offre non numérique inconnu', async () => {
+    recruteurConnecte()
+
+    // Fail-closed : route d'offre attendue numérique, segment inconnu →
+    // 404 immédiat, jamais une requête pour un identifiant non entier.
+    const reponse = await proxy(requeteAvecSession('/recruteur/offres/nimporte-quoi'))
+    expect(reponse?.headers.get('x-middleware-rewrite')).toContain('/404')
+    expect(entrepriseDuCompte).not.toHaveBeenCalled()
+  })
+
+  it('écarte un id hors du domaine entier 32 bits sans requête base', async () => {
+    recruteurConnecte()
+
+    for (const chemin of [
+      '/recruteur/offres/0',
+      '/recruteur/offres/99999999999999999999',
+    ]) {
+      const reponse = await proxy(requeteAvecSession(chemin))
+      expect(reponse?.headers.get('x-middleware-rewrite')).toContain('/404')
+    }
+    expect(entrepriseDuCompte).not.toHaveBeenCalled()
+  })
+
+  it('réécrit 404 pour un recruteur sans entreprise (il ne possède rien)', async () => {
+    recruteurConnecte()
+    entrepriseDuCompte.mockResolvedValue(null)
+
+    const reponse = await proxy(requeteAvecSession('/recruteur/offres/12'))
+
+    expect(reponse?.headers.get('x-middleware-rewrite')).toContain('/404')
+    expect(lireOffreGestion).not.toHaveBeenCalled()
+  })
+
+  it('n’atteint jamais la couche 4 sans accès à l’espace', async () => {
+    // Visiteur → /login ; candidat et admin → /unauthorized : la couche 4
+    // ne s'exécute QUE derrière un gate autorisé (rôle recruteur).
+    expect(
+      (await proxy(requeteAvecSession('/recruteur/offres/12', false)))
+        ?.headers.get('location'),
+    ).toBe('http://localhost:3000/login')
+
+    for (const role of ['candidat', 'admin'] as const) {
+      decode.mockResolvedValue({ userId: 7, role })
+      const reponse = await proxy(requeteAvecSession('/recruteur/offres/12'))
+      expect(reponse?.headers.get('location')).toBe('http://localhost:3000/unauthorized')
+    }
+    expect(entrepriseDuCompte).not.toHaveBeenCalled()
+    expect(lireOffreGestion).not.toHaveBeenCalled()
+  })
+
+  it('couvre aussi les POST : une action forgée vers une offre étrangère meurt en 404', async () => {
+    recruteurConnecte()
+    lireOffreGestion.mockResolvedValue(null)
+
+    const post = new NextRequest('http://localhost:3000/recruteur/offres/12/editer', {
+      method: 'POST',
+      headers: { cookie: 'authjs.session-token=jeton-de-test' },
+    })
+
+    const reponse = await proxy(post)
+    expect(reponse?.headers.get('x-middleware-rewrite')).toContain('/404')
+
+    // Le même POST sur SON offre passe (la page/action revalide derrière).
+    lireOffreGestion.mockResolvedValue({ id: 12 })
+    expect(
+      (await proxy(post))?.headers.get('x-middleware-next'),
+    ).toBe('1')
   })
 })

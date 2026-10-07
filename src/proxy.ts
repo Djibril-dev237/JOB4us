@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { decode } from 'next-auth/jwt'
 
 import type { Role } from '@/lib/definitions'
+import { entrepriseDuCompte, lireOffreGestion } from '@/lib/offres-dal'
 import { slugOffreVisible } from '@/lib/offres-public'
 import {
   OFFRES_MAX_REQUESTS_PER_IP,
@@ -11,7 +12,7 @@ import {
   recordAttempt,
 } from '@/lib/rate-limit'
 
-// ─── Proxy à trois couches (P0 M6 : fusion M1 + M5) ──────────────────────────
+// ─── Proxy à quatre couches (P0 M6 : fusion M1 + M5) ─────────────────────────
 //
 // Convention Next 16 : `middleware.ts` est DÉPRÉCIÉ et renommé `proxy.ts`
 // (doc officielle : « Middleware is deprecated and renamed to Proxy »,
@@ -56,11 +57,29 @@ import {
 // son propre notFound() en défense (course documentée, non éliminable
 // sans sacrifier le streaming).
 //
+// COUCHE 4 — 404 pré-streaming de la gestion (M6) :
+// même vice de stream que la couche 3, même prescription : un recruteur
+// qui ouvre /recruteur/offres/<id> d'une offre ÉTRANGÈRE, supprimée ou
+// inexistante recevrait un 200 noindex si la page devait patienter en
+// stream avant son notFound(). Ici : ownership en amont, en DEUX lectures
+// de la DAL (entrepriseDuCompte, puis lireOffreGestion avec le même
+// `where` id/entrepriseId/deletedAt que la page — un seul SELECT porte
+// l'id, sans lecture-then-vérification) → non trouvée →
+// rewrite vers /404 → 404 strict du routing. Échec → 404, jamais 403 :
+// distinguer « pas la vôtre » de « n'existe pas » révélerait
+// l'existence des offres d'autrui. Couche de STATUT seulement : la page
+// garde son propre notFound() comme contrôle autoritaire (offre rendue
+// entre le rewrite et le rendu = fenêtre non éliminable sans sacrifier
+// le stream, idem couche 3). Le gate de la couche 2 a déjà écarté
+// visiteur/candidat/admin : la couche 4 ne s'exécute que pour un
+// recruteur authentifié. Toutes méthodes confondues (un POST d'action
+// forgé visant une offre étrangère meurt aussi en 404).
+//
 // ORDRE : rate limit d'abord (il protège aussi la base) → contrôle 404
 // sur le périmètre public ; gate par rôle sur les espaces connectés
-// (domaines disjoints — aucun croisement possible). Le décodage JWT
-// n'a lieu QUE sur les chemins de gate : un visiteur sur /offres ne paie
-// aucun coût de décodage.
+// (domaines disjoints — aucun croisement possible) → contrôle 404 de
+// gestion derrière le gate. Le décodage JWT n'a lieu QUE sur les chemins
+// de gate : un visiteur sur /offres ne paie aucun coût de décodage.
 // ---------------------------------------------------------------------------
 
 // ─── Couche 2 : routes protégées (optimistic check, héritage M1) ─────────────
@@ -185,13 +204,21 @@ async function lireSession(request: NextRequest): Promise<SessionProxy | null> {
 }
 
 /**
+ * Issue du gate : soit une décision immédiate (redirection de rôle, à
+ * renvoyer telle quelle), soit la session validée qui ouvre la couche 4,
+ * soit `undefined` (chemin hors gate → passerelle libre).
+ */
+type ResultatAcces =
+  | { decision: NextResponse }
+  | { session: SessionProxy }
+  | undefined
+
+/**
  * Gate optimiste : aucune requête base, décodage JWT seul. Redirections
  * /login (visiteur), /unauthorized (rôle insuffisant), / (connecté sur
  * une page d'auth). `undefined` = chemin hors gate → couche suivante.
  */
-async function controlerAccesEspace(
-  request: NextRequest,
-): Promise<NextResponse | undefined> {
+async function controlerAccesEspace(request: NextRequest): Promise<ResultatAcces> {
   const { pathname } = request.nextUrl
   const routeRole = ROLE_ROUTES.find((route) => correspondPrefixe(pathname, route.prefix))
   const authSeul = AUTH_ROUTES.some((route) => correspondPrefixe(pathname, route))
@@ -202,19 +229,21 @@ async function controlerAccesEspace(
 
   if (pageAuth) {
     return session !== null
-      ? NextResponse.redirect(new URL('/', request.url))
+      ? { decision: NextResponse.redirect(new URL('/', request.url)) }
       : undefined
   }
 
   // Non connecté → page de connexion.
-  if (session === null) return NextResponse.redirect(new URL('/login', request.url))
+  if (session === null) {
+    return { decision: NextResponse.redirect(new URL('/login', request.url)) }
+  }
 
   // Rôle insuffisant → page d'accès refusé (politique : rejet explicite).
   if (routeRole !== undefined && !routeRole.roles.includes(session.role)) {
-    return NextResponse.redirect(new URL('/unauthorized', request.url))
+    return { decision: NextResponse.redirect(new URL('/unauthorized', request.url)) }
   }
 
-  return NextResponse.next()
+  return { session }
 }
 
 // ─── Couche 3 : contrôle de visibilité AVANT rendu (M5 task 10b) ─────────────
@@ -234,6 +263,49 @@ async function controlerFichePublique(
   if (await slugOffreVisible(slug)) return undefined
 
   return NextResponse.rewrite(new URL('/404', request.url))
+}
+
+// ─── Couche 4 : contrôle de gestion AVANT rendu (M6) ────────────────────────
+// Segment non numérique non blanchi → rewrite immédiat, sans base : toute
+// route d'OFFRE porte un id numérique (`/recruteur/offres/<id>[/editer…]`),
+// seul le segment de création (`creer`, fixé pour la Vague 2) est blanchi.
+// Fail-closed : une future route non numérique sous /recruteur/offres
+// devra être blanchie ICI explicitement, sinon elle répond 404.
+
+/** Segment de création d'offre (Vague 2) : seul non numérique toléré. */
+const SEGMENT_CREATION_OFFRE = 'creer'
+
+/** Intervalle d'un entier signé 32 bits (colonne `id` MySQL) : au-delà,
+ * la requête base exploserait (« out of range ») au lieu de répondre 404. */
+const ID_OFFRE_MAX = 2_147_483_647
+
+async function controlerOffreGestion(
+  request: NextRequest,
+  session: SessionProxy,
+): Promise<NextResponse> {
+  const correspondance =
+    /^\/recruteur\/offres\/([^/]+)(?:\/|$)/.exec(request.nextUrl.pathname)
+  if (correspondance === null) return NextResponse.next()
+
+  const segment = correspondance[1] ?? ''
+  if (segment === SEGMENT_CREATION_OFFRE) return NextResponse.next()
+
+  const id = /^[0-9]+$/.test(segment) ? Number(segment) : NaN
+  if (!Number.isInteger(id) || id < 1 || id > ID_OFFRE_MAX) {
+    return NextResponse.rewrite(new URL('/404', request.url))
+  }
+
+  // Ownership (couche STATUT) : entreprise du compte, puis offre avec le
+  // MÊME `where` que la page — deux lectures, un seul SELECT sur l'offre.
+  const entrepriseId = await entrepriseDuCompte(session.userId)
+  if (entrepriseId === null) {
+    // Recruteur sans entreprise : il ne possède aucune offre → 404.
+    return NextResponse.rewrite(new URL('/404', request.url))
+  }
+  if ((await lireOffreGestion(id, entrepriseId)) === null) {
+    return NextResponse.rewrite(new URL('/404', request.url))
+  }
+  return NextResponse.next()
 }
 
 // ─── Proxy ───────────────────────────────────────────────────────────────────
@@ -259,8 +331,12 @@ export async function proxy(
   }
 
   // Espaces connectés : gate par rôle optimiste (aucun coût sur le
-  // périmètre public ci-dessus — domaines disjoints).
-  return controlerAccesEspace(request)
+  // périmètre public ci-dessus — domaines disjoints), puis, derrière un
+  // accès autorisé, 404 pré-streaming de la gestion (couche 4).
+  const acces = await controlerAccesEspace(request)
+  if (acces === undefined) return undefined
+  if ('session' in acces) return controlerOffreGestion(request, acces.session)
+  return acces.decision
 }
 
 export const config = {
