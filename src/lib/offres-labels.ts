@@ -25,6 +25,9 @@ import { estExpiree } from './douala'
 //  * `?maj=` : clés de retour des actions serveur → bandeau affiché par la
 //    page cible (étape 3) — la table MESSAGES_MAJ est la source unique des
 //    textes, actions comme pages l'empruntent.
+//  * `?erreur=` : transitions refusées par la matrice T1-T11 (conflit de
+//    statut, D3, D4 ou D6) → bandeau d'erreur sur le dashboard, source unique
+//    MESSAGES_ERREUR_TRANSITION (jamais de texte libre dans l'URL).
 // ---------------------------------------------------------------------------
 
 /** Statut d'affichage : enum stocké + état dérivé « expirée ». */
@@ -141,5 +144,36 @@ export function messageMaj(cle: string | null | undefined): string | null {
   if (cle === null || cle === undefined) return null
   return Object.prototype.hasOwnProperty.call(MESSAGES_MAJ, cle)
     ? MESSAGES_MAJ[cle as CleMaj]
+    : null
+}
+
+// ─── Bandeaux `?erreur=` (transitions refusées, Vague 2) ─────────────────────
+//
+// Les actions de transition (publier, clôturer…) répondent par une
+// REDIRECTION, pas par un FormState : en cas de refus (matrice T1-T11,
+// D3, D4) elles passent par un paramètre `?erreur=` dont la table ci-
+// dessous est la source UNIQUE — fail-closed comme `?maj=` : clé inconnue
+// ou absente → aucun bandeau, jamais de texte non contrôlé affiché depuis
+// l'URL. Échec de propriété (offre étrangère) = 404, jamais `?erreur=`.
+
+export type CleErreurTransition = 'statut' | 'date' | 'quota' | 'limite'
+
+export const MESSAGES_ERREUR_TRANSITION: Record<CleErreurTransition, string> = {
+  /** Transition impossible depuis le statut courant (ou offre expirée). */
+  statut: 'Cette action n’est plus disponible pour cette offre.',
+  /** D3 : publication avec une date d’expiration déjà passée à Douala. */
+  date: 'La date d’expiration doit être postérieure ou égale à aujourd’hui pour publier.',
+  /** D4 : plafond d’offres `publiee` simultanées atteint. */
+  quota: `Nombre maximum d’offres publiées atteint (${OFFRES_ACTIVES_MAX}).`,
+  /** D6 : seau de 10 créations/heure (création ET duplication). */
+  limite: 'Trop de créations récentes : réessayez dans une heure.',
+}
+
+export function messageErreurTransition(
+  cle: string | null | undefined,
+): string | null {
+  if (cle === null || cle === undefined) return null
+  return Object.prototype.hasOwnProperty.call(MESSAGES_ERREUR_TRANSITION, cle)
+    ? MESSAGES_ERREUR_TRANSITION[cle as CleErreurTransition]
     : null
 }

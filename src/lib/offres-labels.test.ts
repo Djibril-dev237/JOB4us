@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   LIBELLES_STATUT,
+  MESSAGES_ERREUR_TRANSITION,
   MESSAGES_MAJ,
   OFFRES_ACTIVES_MAX,
   OPTIONS_FILTRE_STATUT,
   VALEURS_FILTRE_STATUT,
   VARIANTE_STATUT,
+  messageErreurTransition,
   messageMaj,
   statutAffiche,
   type StatutAffichable,
@@ -142,5 +144,41 @@ describe('politique D4 et bandeaux ?maj=', () => {
     expect(messageMaj('<script>')).toBeNull()
     expect(messageMaj(null)).toBeNull()
     expect(messageMaj(undefined)).toBeNull()
+  })
+})
+
+describe('MESSAGES_ERREUR_TRANSITION (bandeaux ?erreur=)', () => {
+  it('expose exactement les 4 clés de refus, texte non vide', () => {
+    expect(Object.keys(MESSAGES_ERREUR_TRANSITION).sort()).toEqual(
+      ['date', 'limite', 'quota', 'statut'].sort(),
+    )
+    for (const texte of Object.values(MESSAGES_ERREUR_TRANSITION)) {
+      expect(texte.length).toBeGreaterThan(0)
+      expect(texte).toMatch(/^[A-ZÀ-ÿ]/)
+    }
+  })
+
+  it('cite le plafond D4 depuis la constante (jamais un 20 en dur)', () => {
+    expect(MESSAGES_ERREUR_TRANSITION.quota).toContain(String(OFFRES_ACTIVES_MAX))
+  })
+
+  it('refuse toute clé inconnue (fail-closed comme messageMaj)', () => {
+    expect(messageErreurTransition('statut')).toBe(
+      'Cette action n’est plus disponible pour cette offre.',
+    )
+    expect(messageErreurTransition('inconnue')).toBeNull()
+    expect(messageErreurTransition('<script>')).toBeNull()
+    expect(messageErreurTransition(null)).toBeNull()
+    expect(messageErreurTransition(undefined)).toBeNull()
+  })
+
+  it('ne croise jamais les deux tables (?maj= vs ?erreur=)', () => {
+    const clesMaj = Object.keys(MESSAGES_MAJ)
+    for (const cle of Object.keys(MESSAGES_ERREUR_TRANSITION)) {
+      expect(clesMaj).not.toContain(cle)
+    }
+    // Un aiguillage qui basculerait sur messageErreurTransition avec une
+    // clé de succès n'afficherait rien plutôt qu'un mauvais texte.
+    expect(messageErreurTransition('publiee')).toBeNull()
   })
 })
