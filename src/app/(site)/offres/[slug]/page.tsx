@@ -1,29 +1,9 @@
 import type { Metadata } from 'next'
-import type { ReactNode } from 'react'
 import { cache } from 'react'
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-import {
-  IconArrowRight,
-  IconBarChart,
-  IconBriefcase,
-  IconBuilding,
-  IconFileText,
-  IconGrid,
-  IconInfo,
-  IconMapPin,
-  IconTag,
-  IconWrench,
-} from '@/components/icons'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
-import { NIVEAU_EXPERIENCE_LABELS, TYPE_CONTRAT_LABELS } from '@/lib/definitions'
-import {
-  lireOffrePublique,
-  listerOffresSimilaires,
-  type OffreDetail,
-} from '@/lib/offres-public'
+import { FicheOffre } from '@/components/offres/fiche-offre'
+import { lireOffrePublique, listerOffresSimilaires } from '@/lib/offres-public'
 
 // ─── Fiche publique d'une offre (M5, task 5) ─────────────────────────────────
 //
@@ -35,24 +15,12 @@ import {
 // d'existence. La règle du spike #98097 (rendu serveur async, suspension
 // M2-M4 non reproduite en 16.3.6) s'applique ici aussi.
 //
-// Parité legacy (offres/show.blade.php) : en-tête (logo 64 px, titre, nom
-// d'entreprise, 4 badges dont pays), Description (nl2br → whitespace-pre-wrap,
-// jamais de HTML injecté), Compétences requises (si présentes), Offres
-// similaires (4 max, lignes cliquables), colonne droite « Détails »
-// (contrat, niveau, localisation, salaire FCFA si salaire_visible, dates)
-// et « À propos de l'entreprise ». Libellés propres (les artefacts `stage`,
-// ucfirst `Sans_experience` du blade ne sont pas portés) ; le violet
-// badge-categorie n'existe pas en tokens M2 → neutre.
-//
-// Hors périmètre M5 (reporté en M7) : carte de candidature (postuler,
-// sauvegarder, déjà postulé, contacter le recruteur), modal de candidature,
-// détection d'état auth — la fiche M5 est strictement passive. Livré :
-// SEO (generateMetadata, task 6), squelette (task 8), a11y (task 9).
-//
-// A11y (task 9) : hiérarchie h1 (titre) → h2 (sections) continue ; les
-// blocs d'initiales sont décoratifs (aria-hidden) — le nom de l'entreprise
-// est toujours affiché à côté/dessous ; le wrapper du h2 « À propos » est
-// un <div> (un <span> ne peut pas contenir de <h2> — contenu phrasing).
+// D10 (M6) : le JSX de RENDU a été déplacé tel quel dans
+// src/components/offres/fiche-offre.tsx (composant pur partagé avec
+// l'aperçu du formulaire recruteur) — cette page ne fait que l'héberger :
+// mêmes arbres, même sortie HTML, aucune requête de plus. La structure
+// détaillée (parité show.blade.php, a11y, bloc candidature reporté en M7)
+// est documentée au composant.
 //
 // Requêtes : findFirst (fiche) + findMany (similaires) = 2, aucune par
 // ligne — verrouillé par le test « comptage de requêtes par page ». Cache
@@ -61,19 +29,6 @@ import {
 // lireOffreMiseEnCache) ; aucun cache de résultat entre requêtes — une
 // offre devenue invisible doit 404 immédiatement.
 // ---------------------------------------------------------------------------
-
-/** Dates publiques figées sur le fuseau de la cible (choix M5, cf. DAL). */
-const FORMATEUR_DATE = new Intl.DateTimeFormat('fr-FR', {
-  timeZone: 'Africa/Douala',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-})
-
-/** Parité `number_format($x, 0, ',', ' ')` legacy : « 1 500 ». */
-const FORMATEUR_MONTANT = new Intl.NumberFormat('fr-FR', {
-  maximumFractionDigits: 0,
-})
 
 // Dédoublonnage generateMetadata ↔ page : une SEULE requête findFirst par
 // requête client au lieu de deux (motif React cache documenté par Next).
@@ -113,233 +68,7 @@ export default async function PageOffre({ params }: PageProps<'/offres/[slug]'>)
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Colonne principale */}
-        <div className="space-y-4 lg:col-span-2">
-          {/* En-tête de l'offre */}
-          <Card>
-            <div className="flex items-start gap-3">
-              {/* Décoratif (task 9) : le nom de l'entreprise suit dans
-                  le h1 contexte. */}
-              <div
-                aria-hidden="true"
-                className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-tint text-base font-bold text-brand-dark"
-              >
-                {offre.entreprise.logo !== null ? (
-                  /* eslint-disable-next-line @next/next/no-img-element -- URL publique (option B) : 302 vers signature 5 minutes, Cache-Control public 300 s — l'optimiseur d'images Next ajouterait un cache non maîtrisé. */
-                  <img
-                    src={`/api/files/logo?entrepriseId=${offre.entreprise.id}`}
-                    alt=""
-                    className="h-full w-full rounded-md object-cover"
-                  />
-                ) : (
-                  offre.entreprise.nom.slice(0, 2).toUpperCase()
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-2xl font-bold tracking-tight text-ink">
-                  {offre.titre}
-                </h1>
-                <p className="mt-1 font-semibold text-brand">{offre.entreprise.nom}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge variant="brand" className="gap-1 px-3 py-2">
-                    <IconBriefcase size={14} />
-                    {TYPE_CONTRAT_LABELS[offre.typeContrat]}
-                  </Badge>
-                  <Badge variant="warn" className="gap-1 px-3 py-2">
-                    <IconMapPin size={14} />
-                    {offre.ville}
-                    {offre.pays !== '' ? `, ${offre.pays}` : ''}
-                  </Badge>
-                  <Badge variant="ok" className="gap-1 px-3 py-2">
-                    <IconBarChart size={14} />
-                    {NIVEAU_EXPERIENCE_LABELS[offre.niveauExperience]}
-                  </Badge>
-                  <Badge className="gap-1 px-3 py-2">
-                    <IconTag size={14} />
-                    {offre.categorie.nom}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Description — nl2br(e()) legacy : texte échappé + retours à la
-              ligne. `whitespace-pre-wrap` produit le même rendu sans jamais
-              interpréter du HTML (anti-XSS, aucun dangerouslySetInnerHTML). */}
-          <Card>
-            <TitreSection icone={<IconFileText size={18} />}>
-              Description du poste
-            </TitreSection>
-            <p className="mt-3 text-[0.95rem] leading-[1.8] whitespace-pre-wrap text-ink-muted">
-              {offre.description}
-            </p>
-          </Card>
-
-          {/* Compétences — carte absente au legacy si vide (identique ici). */}
-          {offre.competences.length > 0 ? (
-            <Card>
-              <TitreSection icone={<IconWrench size={18} />}>
-                Compétences requises
-              </TitreSection>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {offre.competences.map((item) => (
-                  <Badge key={item.competence.nom} variant="brand" className="px-3 py-2">
-                    {item.competence.nom}
-                  </Badge>
-                ))}
-              </div>
-            </Card>
-          ) : null}
-
-          {/* Similaires : lignes pleine largeur (card-body p-0 legacy →
-              conteneur dédié, le composant Card a un padding fixe). */}
-          {similaires.length > 0 ? (
-            <section className="overflow-hidden rounded-md border border-line bg-surface shadow-card">
-              <h2 className="flex items-center gap-2 border-b border-line px-5 py-4 text-base font-semibold text-ink">
-                <span className="text-brand">
-                  <IconGrid size={18} />
-                </span>
-                Offres similaires
-              </h2>
-              <ul className="divide-y divide-line">
-                {similaires.map((similaire) => (
-                  <li key={similaire.id}>
-                    <Link
-                      href={`/offres/${similaire.slug}`}
-                      className="flex items-center gap-3 p-3 transition-colors duration-fast hover:bg-surface-alt"
-                    >
-                      {/* Parité stricte : la ligne similaire affiche les
-                          initiales au legacy, pas le logo image —
-                          décoratif (task 9), le nom suit dans le texte. */}
-                      <div
-                        aria-hidden="true"
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-brand-tint text-xs font-bold text-brand-dark"
-                      >
-                        {similaire.entreprise.nom.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-ink">{similaire.titre}</p>
-                        <p className="text-xs text-brand">{similaire.entreprise.nom}</p>
-                        <p className="text-xs text-ink-muted">
-                          {similaire.ville} · {TYPE_CONTRAT_LABELS[similaire.typeContrat]}
-                        </p>
-                      </div>
-                      <IconArrowRight size={16} className="shrink-0 text-ink-muted" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </div>
-
-        {/* Colonne droite — le bloc candidature (postuler / sauvegarder /
-            contacter) appartient à M7 : aucune logique d'état auth en M5. */}
-        <div className="space-y-4">
-          <Card>
-            <TitreSection icone={<IconInfo size={18} />}>Détails</TitreSection>
-            <ul className="mt-1 divide-y divide-line">
-              <LigneDetail
-                label="Type de contrat"
-                valeur={TYPE_CONTRAT_LABELS[offre.typeContrat]}
-              />
-              <LigneDetail
-                label="Niveau requis"
-                valeur={NIVEAU_EXPERIENCE_LABELS[offre.niveauExperience]}
-              />
-              <LigneDetail label="Localisation" valeur={offre.ville} />
-              {offre.salaireMin !== null && offre.salaireVisible ? (
-                <LigneDetail
-                  label="Salaire"
-                  className="text-ok"
-                  valeur={formatSalaire(offre.salaireMin, offre.salaireMax)}
-                />
-              ) : null}
-              <LigneDetail
-                label="Publiée le"
-                valeur={FORMATEUR_DATE.format(offre.createdAt)}
-              />
-              <LigneDetail
-                label="Expire le"
-                className="text-danger"
-                valeur={FORMATEUR_DATE.format(offre.dateExpiration)}
-              />
-            </ul>
-          </Card>
-
-          {/* À propos — parité stricte : initiales (pas d'image) au legacy. */}
-          <Card className="text-center">
-            <div className="flex">
-              <TitreSection icone={<IconBuilding size={18} />}>
-                À propos de l&apos;entreprise
-              </TitreSection>
-            </div>
-            <div
-              aria-hidden="true"
-              className="mx-auto mt-4 flex h-[60px] w-[60px] items-center justify-center rounded-md bg-brand-tint text-base font-bold text-brand-dark"
-            >
-              {offre.entreprise.nom.slice(0, 2).toUpperCase()}
-            </div>
-            <p className="mt-3 font-bold text-ink">{offre.entreprise.nom}</p>
-            {offre.entreprise.secteurActivite !== null ? (
-              <p className="mt-1 text-sm text-ink-muted">
-                {offre.entreprise.secteurActivite}
-              </p>
-            ) : null}
-            {offre.entreprise.ville !== null ? (
-              <p className="mt-1 flex items-center justify-center gap-1 text-sm text-ink-muted">
-                <IconMapPin size={14} />
-                {offre.entreprise.ville}
-              </p>
-            ) : null}
-          </Card>
-        </div>
-      </div>
+      <FicheOffre offre={offre} similaires={similaires} />
     </div>
   )
-}
-
-// ─── Fragments locaux ────────────────────────────────────────────────────────
-
-/** Titre de section de carte (réf. card-header legacy : icône bleue + label). */
-function TitreSection({ icone, children }: { icone: ReactNode; children: ReactNode }) {
-  return (
-    <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-      <span className="text-brand">{icone}</span>
-      {children}
-    </h2>
-  )
-}
-
-/** Ligne « Détails » (réf. justify-content-between + border de la liste). */
-function LigneDetail({
-  label,
-  valeur,
-  className,
-}: {
-  label: string
-  valeur: string
-  className?: string | undefined
-}) {
-  return (
-    <li className="flex items-center justify-between gap-2 py-2">
-      <span className="text-sm text-ink-muted">{label}</span>
-      <span className={`text-sm font-medium ${className ?? 'text-ink'}`}>{valeur}</span>
-    </li>
-  )
-}
-
-/**
- * Parity `number_format($salaire, 0, ',', ' ') FCFA` : « 1 500 » ou
- * « 1 500 — 2 000 FCFA ». Le type Decimal de Prisma passe par Number()
- * (decimal.js valueOf → string numérique) — jamais de virgule décimale,
- * le legacy tronquait aussi à 0 décimale.
- */
-function formatSalaire(
-  min: NonNullable<OffreDetail['salaireMin']>,
-  max: OffreDetail['salaireMax'],
-): string {
-  const bornes = max !== null ? ` — ${FORMATEUR_MONTANT.format(Number(max))}` : ''
-  return `${FORMATEUR_MONTANT.format(Number(min))}${bornes} FCFA`
 }
