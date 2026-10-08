@@ -1,16 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Prisma } from '@prisma/client'
 
 import {
   SELECT_OFFRE_GESTION,
+  SELECT_OFFRE_LISTE,
   SELECT_OFFRE_MODIFICATION,
   compterOffresPubliees,
   entrepriseDuCompte,
   lireOffreGestion,
   lireOffreModifiable,
   lireOffrePourAdmin,
+  listerOffresGestion,
   type OffreGestion,
+  type OffreListe,
   type OffreModification,
 } from './offres-dal'
 
@@ -32,6 +35,12 @@ interface ArgsCount {
   where?: Prisma.OffreWhereInput
 }
 
+interface ArgsFindMany {
+  where?: Prisma.OffreWhereInput
+  select?: Prisma.OffreSelect
+  orderBy?: Prisma.OffreOrderByWithRelationInput
+}
+
 interface ArgsEntrepriseFindUnique {
   where?: { userId: number }
   select?: { id: boolean }
@@ -40,17 +49,22 @@ interface ArgsEntrepriseFindUnique {
 // Le type de retour dépend du `select` appelé (gestion ou modification) :
 // le mock reste volontairement `unknown` — les garanties se lisent sur les
 // ARGS (where/select) et sur les types de retour stricts des fonctions DAL.
-const { offreFindFirst, offreCount, entrepriseFindUnique } = vi.hoisted(() => ({
+const { offreFindFirst, offreFindMany, offreCount, entrepriseFindUnique } = vi.hoisted(() => ({
   offreFindFirst: vi.fn<(args: ArgsFindFirst) => Promise<unknown>>(),
+  offreFindMany: vi.fn<(args: ArgsFindMany) => Promise<unknown>>(),
   offreCount: vi.fn<(args: ArgsCount) => Promise<number>>(),
   entrepriseFindUnique: vi.fn<
     (args: ArgsEntrepriseFindUnique) => Promise<{ id: number } | null>
   >(),
 }))
 
+// Prisma n'expose QUE les méthodes testées : toute autre requête du DAL
+// (count sur une liste, findFirst par ligne…) lèverait une TypeError et
+// ferait échouer le test — c'est ainsi qu'on verrouille « UNE seule
+// findMany, rien d'autre ».
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    offre: { findFirst: offreFindFirst, count: offreCount },
+    offre: { findFirst: offreFindFirst, findMany: offreFindMany, count: offreCount },
     entreprise: { findUnique: entrepriseFindUnique },
   },
 }))
@@ -88,9 +102,11 @@ const MODIFICATION: OffreModification = {
 
 beforeEach(() => {
   offreFindFirst.mockReset()
+  offreFindMany.mockReset()
   offreCount.mockReset()
   entrepriseFindUnique.mockReset()
   offreFindFirst.mockResolvedValue(null)
+  offreFindMany.mockResolvedValue([])
   offreCount.mockResolvedValue(0)
   entrepriseFindUnique.mockResolvedValue(null)
 })
@@ -283,5 +299,146 @@ describe('listes blanches (verrou anti-fuite)', () => {
     expect(SELECT_OFFRE_MODIFICATION.competences).toEqual({
       select: { competence: { select: { id: true, nom: true } } },
     })
+  })
+})
+
+describe('listerOffresGestion (liste du dashboard)', () => {
+  // Frontière Douala FIGÉE : 15/03/2026 12:00Z = 15/03 à 13:00 à Douala,
+  // donc le minuit civil suivant vaut 14/03 23:00Z. Instant attendu écrit
+  // en dur : le test échouerait si le DAL comparait dans le fuseau du
+  // serveur (ici UTC, minuit 15/03 = 15/03 00:00Z) au lieu de Douala.
+  const MINUIT_DOUALA = new Date('2026-03-14T23:00:00Z')
+
+  const LIGNE: OffreListe = {
+    id: 42,
+    titre: 'Developpeur back-end',
+    statut: 'publiee',
+    dateExpiration: new Date('2026-12-30T00:00:00Z'),
+    ville: 'Douala',
+    typeContrat: 'CDI',
+    niveauExperience: 'junior',
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T12:00:00Z'))
+    offreFindMany.mockResolvedValue([LIGNE])
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const argsDe = (): ArgsFindMany => offreFindMany.mock.calls[0]?.[0] ?? {}
+
+  it('filtre vide (« Toutes ») : ownership + suppression seule, aucun statut ni date', async () => {
+    expect(await listerOffresGestion(3, '')).toEqual([LIGNE])
+
+    expect(offreFindMany).toHaveBeenCalledTimes(1)
+    expect(argsDe().where).toEqual({ entrepriseId: 3, deletedAt: null })
+  })
+
+  it('filtre brouillon : statut seul, sans clause de date', async () => {
+    await listerOffresGestion(3, 'brouillon')
+
+    expect(argsDe().where).toEqual({
+      entrepriseId: 3,
+      deletedAt: null,
+      statut: 'brouillon',
+    })
+    expect(argsDe().where).not.toHaveProperty('dateExpiration')
+  })
+
+  it('filtre clôturée : statut seul, sans clause de date', async () => {
+    await listerOffresGestion(3, 'cloturee')
+
+    expect(argsDe().where).toEqual({
+      entrepriseId: 3,
+      deletedAt: null,
+      statut: 'cloturee',
+    })
+    expect(argsDe().where).not.toHaveProperty('dateExpiration')
+  })
+
+  it('filtre suspendue : statut seul, sans clause de date', async () => {
+    await listerOffresGestion(3, 'suspendue')
+
+    expect(argsDe().where).toEqual({
+      entrepriseId: 3,
+      deletedAt: null,
+      statut: 'suspendue',
+    })
+    expect(argsDe().where).not.toHaveProperty('dateExpiration')
+  })
+
+  it('filtre « Publiées » : statut publiee ET non échue (gte minuit Douala)', async () => {
+    await listerOffresGestion(3, 'publiee')
+
+    expect(argsDe().where).toEqual({
+      entrepriseId: 3,
+      deletedAt: null,
+      statut: 'publiee',
+      dateExpiration: { gte: MINUIT_DOUALA },
+    })
+  })
+
+  it('filtre « Expirées » : même statut mais échue (lt minuit Douala)', async () => {
+    await listerOffresGestion(3, 'expiree')
+
+    expect(argsDe().where).toEqual({
+      entrepriseId: 3,
+      deletedAt: null,
+      statut: 'publiee',
+      dateExpiration: { lt: MINUIT_DOUALA },
+    })
+  })
+
+  it('UNE seule findMany : select exact, tri legacy, aucune autre requête', async () => {
+    expect(await listerOffresGestion(3, '')).toEqual([LIGNE])
+
+    expect(offreFindMany).toHaveBeenCalledTimes(1)
+    const args = argsDe()
+    expect(args.select).toEqual(SELECT_OFFRE_LISTE)
+    // Parité `OffreController::index` → `latest()` : création récente d'abord.
+    expect(args.orderBy).toEqual({ createdAt: 'desc' })
+
+    // Aucune requête par ligne ni de compteur annexe : le mock Prisma ne
+    // expose que findMany, count/findFirst/findUnique n'ont pas été touchés.
+    expect(offreFindFirst).not.toHaveBeenCalled()
+    expect(offreCount).not.toHaveBeenCalled()
+    expect(entrepriseFindUnique).not.toHaveBeenCalled()
+  })
+
+  it('la liste blanche n’expose que les champs d’une carte (aucune donnée sensible)', () => {
+    expect(Object.keys(SELECT_OFFRE_LISTE).sort()).toEqual([
+      'dateExpiration',
+      'id',
+      'niveauExperience',
+      'statut',
+      'titre',
+      'typeContrat',
+      'ville',
+    ])
+    for (const interdite of [
+      'description',
+      'emailContact',
+      'telephone',
+      'adresse',
+      'siteWeb',
+      'salaireMin',
+      'salaireMax',
+      'slug',
+      'vues',
+      'entreprise',
+      'candidatures',
+      'deletedAt',
+      'entrepriseId',
+    ]) {
+      expect(SELECT_OFFRE_LISTE).not.toHaveProperty(interdite)
+    }
+  })
+
+  it('l’horloge est bien figée (garde-fou des deux bornes ci-dessus)', () => {
+    expect(new Date().toISOString()).toBe('2026-03-15T12:00:00.000Z')
   })
 })

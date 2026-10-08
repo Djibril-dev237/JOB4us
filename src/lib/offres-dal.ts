@@ -2,6 +2,8 @@ import 'server-only'
 
 import type { Prisma } from '@prisma/client'
 
+import { dateCouranteDouala, minuitDouala } from '@/lib/douala'
+import type { ValeurFiltreStatut } from '@/lib/offres-labels'
 import { prisma } from '@/lib/prisma'
 
 // ─── Couche d'accès aux données de GESTION des offres (M6, Vague 1) ──────────
@@ -31,8 +33,9 @@ import { prisma } from '@/lib/prisma'
 // formulaire (liste blanche d'écriture côté agent 1A) : les listes
 // blanches ci-dessous SERVENT ces champs à la lecture (compare-and-set des
 // transitions, garde d'ownership) mais ne les autorisent jamais en entrée.
-// Ce module alimente les actions serveur de la Vague 2 et la route
-// /admin/offres — jamais le client.
+// Ce module alimente les actions serveur de la Vague 2, le dashboard
+// /recruteur/offres (chargeur de liste) et la route /admin/offres —
+// jamais le client.
 // ---------------------------------------------------------------------------
 
 // ─── Entreprise du compte ────────────────────────────────────────────────────
@@ -211,5 +214,83 @@ export async function lireOffrePourAdmin(offreId: number): Promise<OffreModifica
 export async function compterOffresPubliees(entrepriseId: number): Promise<number> {
   return prisma.offre.count({
     where: { entrepriseId, statut: 'publiee', deletedAt: null },
+  })
+}
+
+// ─── Liste du dashboard de gestion (D8/D9) ───────────────────────────────────
+
+/**
+ * Champs affichés par une carte du dashboard (une seule ligne par offre) :
+ * identité, statut dérivable, libellés d'affichage et date d'expiration.
+ *
+ * Volontairement très étroit : ni `description` (LongText), ni
+ * coordonnées de l'entreprise, ni `slug`, ni `vues`, ni relation — la liste
+ * n'affiche que ce que la carte M6 restitue, et une seule findMany suffit.
+ * `slug` est absent car le dashboard n'a AUCUN lien public (le lien se fait
+ * en /recruteur/offres/<id>/editer, piloté par `id`).
+ */
+export const SELECT_OFFRE_LISTE = {
+  id: true,
+  titre: true,
+  statut: true,
+  dateExpiration: true,
+  ville: true,
+  typeContrat: true,
+  niveauExperience: true,
+} satisfies Prisma.OffreSelect
+
+export type OffreListe = Prisma.OffreGetPayload<{ select: typeof SELECT_OFFRE_LISTE }>
+
+/**
+ * Offres d'une entreprise à afficher sur le dashboard, pour UN filtre.
+ *
+ * Une SEULE `findMany` (aucune requête par ligne, aucun N+1) : le where
+ * porte toujours `entrepriseId` + `deletedAt: null` — un compte ne voit
+ * que ses offres vivantes, jamais celles d'autrui ni les supprimées.
+ *
+ * Les 6 valeurs de `ValeurFiltreStatut` sont EXCLUSIVES entre elles, comme
+ * dans le prédicat M5 : « publiée » = statut `publiee` ET non échue à
+ * Douala, « expirée » = même statut mais échue (jamais les deux), et les
+ * trois autres ne filtrent que `statut`. Les bornes viennent de la
+ * frontière testée `@/lib/douala` (minuit civil Africa/Douala) — aucun
+ * `new Date()` local pour la comparaison : dev UTC+1 et Vercel UTC
+ * doivent produire la même liste.
+ *
+ * Tri repris du legacy (`OffreController::index` → `latest()`) :
+ * création la plus récente d'abord. Pas de pagination en M6 (décision
+ * documentée : volume borné par compte — D4 pour les publiées, D6 pour le
+ * rythme de création).
+ */
+export async function listerOffresGestion(
+  entrepriseId: number,
+  filtre: ValeurFiltreStatut,
+): Promise<OffreListe[]> {
+  const now = new Date()
+  const limiteJour = minuitDouala(dateCouranteDouala(now))
+  const where: Prisma.OffreWhereInput = { entrepriseId, deletedAt: null }
+
+  switch (filtre) {
+    case '':
+      // « Toutes » : aucune clause de statut — les 4 statuts stockés et
+      // les offres publiées échues sortent ensemble (le badge dérive).
+      break
+    case 'publiee':
+      where.statut = 'publiee'
+      where.dateExpiration = { gte: limiteJour }
+      break
+    case 'expiree':
+      where.statut = 'publiee'
+      where.dateExpiration = { lt: limiteJour }
+      break
+    default:
+      // brouillon | cloturee | suspendue : statut seul, sans clause de
+      // date (une clôturée passée reste clôturée, cf. statutAffiche).
+      where.statut = filtre
+  }
+
+  return prisma.offre.findMany({
+    where,
+    select: SELECT_OFFRE_LISTE,
+    orderBy: { createdAt: 'desc' },
   })
 }
