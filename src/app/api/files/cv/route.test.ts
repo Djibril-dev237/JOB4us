@@ -20,17 +20,35 @@ type MockSession = { user: { id: number; role: Role }; expires: string }
 /** Colonnes lues par la route sur Candidat (select id, userId, cvPath). */
 type CandidatLu = { id: number; userId: number; cvPath: string | null }
 
-const { authMock, candidatFindUnique, candidatureFindFirst } = vi.hoisted(() => ({
-  authMock: vi.fn<() => Promise<MockSession | null>>(),
-  candidatFindUnique: vi.fn<() => Promise<CandidatLu | null>>(),
-  candidatureFindFirst: vi.fn<() => Promise<{ id: number } | null>>(),
-}))
+/**
+ * Colonnes lues par la route sur Candidature (select id, cvPath,
+ * candidat.id/userId, offre.entreprise.userId) — une SEULE lecture porte le
+ * contrôle du mode `?candidature=`.
+ */
+type CandidatureLu = {
+  id: number
+  cvPath: string | null
+  candidat: { id: number; userId: number }
+  offre: { entreprise: { userId: number } }
+}
+
+const { authMock, candidatFindUnique, candidatureFindFirst, candidatureFindUnique } = vi.hoisted(
+  () => ({
+    authMock: vi.fn<() => Promise<MockSession | null>>(),
+    candidatFindUnique: vi.fn<() => Promise<CandidatLu | null>>(),
+    candidatureFindFirst: vi.fn<() => Promise<{ id: number } | null>>(),
+    candidatureFindUnique: vi.fn<() => Promise<CandidatureLu | null>>(),
+  }),
+)
 
 vi.mock('@/auth', () => ({ auth: authMock }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     candidat: { findUnique: candidatFindUnique },
-    candidature: { findFirst: candidatureFindFirst },
+    candidature: {
+      findFirst: candidatureFindFirst,
+      findUnique: candidatureFindUnique,
+    },
     accesFichier: { create: vi.fn() },
   },
 }))
@@ -44,6 +62,29 @@ const SIGNED_URL = 'https://r2.example/bucket/cvs/uuid.pdf?X-Amz-Signature=abc'
 
 /** Cible : profil CV de l'utilisateur 42, clé R2 privé. */
 const CIBLE: CandidatLu = { id: 5, userId: 42, cvPath: 'cvs/aaaa-bbbb.pdf' }
+
+/**
+ * Clé du SNAPSHOT rattaché à la candidature — VOLONTAIREMENT distincte de
+ * `CIBLE.cvPath` pour prouver que le mode `?candidature=` sert la pièce
+ * jointe figée et jamais le cvPath actuel du profil.
+ */
+const SNAPSHOT = 'candidatures/1111-2222-3333.pdf'
+
+/** Ligne 11 : candidat 5 (userId 42), offres du recruteur (userId 3). */
+const CANDIDATURE: CandidatureLu = {
+  id: 11,
+  cvPath: SNAPSHOT,
+  candidat: { id: 5, userId: 42 },
+  offre: { entreprise: { userId: 3 } },
+}
+
+/** Select exact de la lecture unique du mode `?candidature=`. */
+const SELECT_CANDIDATURE = {
+  id: true,
+  cvPath: true,
+  candidat: { select: { id: true, userId: true } },
+  offre: { select: { entreprise: { select: { userId: true } } } },
+}
 
 function login(id: number, role: Role): void {
   authMock.mockResolvedValue({
@@ -193,6 +234,175 @@ describe('GET /api/files/cv — journal fail-closed', () => {
     vi.mocked(logCvAccess).mockRejectedValueOnce(new Error('journal indisponible'))
 
     await expect(GET(cvRequest())).rejects.toThrow('journal indisponible')
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+  })
+})
+
+// ─── M7 : pièce jointe FIGÉE d'une candidature (`?candidature=<id>`) ─────────
+// Le CV servi est `Candidature.cvPath` (le snapshot de la LIGNE), jamais le
+// `candidat.cvPath` du profil : les deux clés sont mockées et DISTINCTES pour
+// que toute confusion échoue l'assertion.
+// ---------------------------------------------------------------------------
+
+describe('GET /api/files/cv — pièce jointe de candidature (lignes M7)', () => {
+  it("sert le SNAPSHOT de la ligne du candidat connecté : 302, sans journal", async () => {
+    login(42, 'candidat')
+    candidatureFindUnique.mockResolvedValue(CANDIDATURE)
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(SIGNED_URL)
+    expect(response.headers.get('cache-control')).toContain('no-store')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    // La clé signée est celle de LA LIGNE, pas celle du profil.
+    expect(signDownloadUrl).toHaveBeenCalledWith({
+      key: SNAPSHOT,
+      filename: 'cv-candidature-11.pdf',
+      contentType: 'application/pdf',
+    })
+    expect(signDownloadUrl).not.toHaveBeenCalledWith(
+      expect.objectContaining({ key: CIBLE.cvPath }),
+    )
+    // Lecture unique sur la ligne : le profil n'est pas touché.
+    expect(candidatureFindUnique).toHaveBeenCalledWith({
+      where: { id: 11 },
+      select: SELECT_CANDIDATURE,
+    })
+    expect(candidatFindUnique).not.toHaveBeenCalled()
+    // Le propriétaire n'est pas un événement sensible.
+    expect(logCvAccess).not.toHaveBeenCalled()
+  })
+
+  it("refuse la candidature d'un autre candidat : 403, sans journal ni signature", async () => {
+    login(7, 'candidat')
+    candidatureFindUnique.mockResolvedValue(CANDIDATURE)
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(403)
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+    expect(logCvAccess).not.toHaveBeenCalled()
+    expect(candidatFindUnique).not.toHaveBeenCalled()
+  })
+
+  it("autorise le recruteur dont l'offre porte la candidature : 302 + journal AVANT signature", async () => {
+    login(3, 'recruteur')
+    candidatureFindUnique.mockResolvedValue(CANDIDATURE)
+    const ordre: string[] = []
+    vi.mocked(logCvAccess).mockImplementation(async () => {
+      ordre.push('journal')
+    })
+    vi.mocked(signDownloadUrl).mockImplementation(async () => {
+      ordre.push('signature')
+      return SIGNED_URL
+    })
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(SIGNED_URL)
+    // Journal AVANT toute diffusion (fail-closed) : le recruteur (3) est
+    // l'acteur, le CANDIDAT propriétaire de la ligne (5) est la cible.
+    expect(logCvAccess).toHaveBeenCalledWith(3, 5)
+    expect(ordre).toEqual(['journal', 'signature'])
+    expect(candidatFindUnique).not.toHaveBeenCalled()
+    expect(candidatureFindFirst).not.toHaveBeenCalled()
+  })
+
+  it("refuse un recruteur sans offre liée : 403, sans journal ni signature", async () => {
+    login(9, 'recruteur')
+    candidatureFindUnique.mockResolvedValue(CANDIDATURE)
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(403)
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+    expect(logCvAccess).not.toHaveBeenCalled()
+  })
+
+  it("autorise l'admin : 302 + journal sur le candidat propriétaire", async () => {
+    login(1, 'admin')
+    candidatureFindUnique.mockResolvedValue(CANDIDATURE)
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(SIGNED_URL)
+    expect(logCvAccess).toHaveBeenCalledWith(1, 5)
+    expect(signDownloadUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ key: SNAPSHOT, filename: 'cv-candidature-11.pdf' }),
+    )
+  })
+
+  it('répond 401 à un visiteur avant toute requête base', async () => {
+    authMock.mockResolvedValue(null)
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(401)
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+    expect(logCvAccess).not.toHaveBeenCalled()
+  })
+
+  it("répond 404 quand la candidature n'existe pas, sans diffusion ni journal", async () => {
+    login(42, 'candidat')
+    candidatureFindUnique.mockResolvedValue(null)
+
+    const response = await GET(cvRequest('?candidature=9999'))
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+    expect(logCvAccess).not.toHaveBeenCalled()
+  })
+
+  it('répond 404 quand la ligne est sans pièce jointe (cvPath null)', async () => {
+    login(42, 'candidat')
+    candidatureFindUnique.mockResolvedValue({ ...CANDIDATURE, cvPath: null })
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    // Indiscernable du 404 précédent : aucune fuite d'existence.
+    expect(response.status).toBe(404)
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+    expect(logCvAccess).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/files/cv — paramètres mutuellement exclusifs', () => {
+  it('refuse les DEUX paramètres présents (400), sans requête base', async () => {
+    login(42, 'candidat')
+
+    const response = await GET(cvRequest('?candidatId=5&candidature=11'))
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(candidatFindUnique).not.toHaveBeenCalled()
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+  })
+
+  it("refuse l'absence de paramètre (400), sans requête base", async () => {
+    login(42, 'candidat')
+
+    const response = await GET(cvRequest(''))
+
+    expect(response.status).toBe(400)
+    expect(candidatFindUnique).not.toHaveBeenCalled()
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+  })
+
+  it('refuse ?candidature=abc (400), sans requête base', async () => {
+    login(42, 'candidat')
+
+    for (const query of ['?candidature=abc', '?candidature=-1', '?candidature=0']) {
+      expect((await GET(cvRequest(query))).status).toBe(400)
+    }
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
+    expect(candidatFindUnique).not.toHaveBeenCalled()
     expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 })

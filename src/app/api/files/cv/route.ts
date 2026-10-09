@@ -1,23 +1,39 @@
 import { auth } from '@/auth'
 import { logCvAccess } from '@/lib/audit'
+import type { Role } from '@/lib/definitions'
 import { prisma } from '@/lib/prisma'
 import { downloadMeta, signDownloadUrl } from '@/lib/storage'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// ─── Téléchargement d'un CV (matrice d'accès de l'Étape 2, validée) ──────────
+// ─── Téléchargement d'un CV : profil (Étape 2) OU pièce jointe figée (M7) ───
 //
-// GET /api/files/cv?candidatId=<id>  →  302 vers une URL signée R2 (5 min).
+// GET /api/files/cv  →  302 vers une URL signée R2 (5 min).
+// DEUX paramètres MUTUELLEMENT EXCLUSIFS, exactement UN requis :
+// - ?candidatId=<id>   →  CV de PROFIL (`candidat.cvPath`) — inchangé ;
+// - ?candidature=<id>  →  la PIÈCE JOINTE FIGÉE de la candidature
+//   (`candidature.cvPath`, snapshot M7) : « le CV rattaché à une candidature
+//   reste accessible même si le candidat modifie son profil » — le snapshot
+//   servi est celui de LA LIGNE, jamais le cvPath actuel du profil.
 //
 // Réponses (JSON, car le Proxy Next.js exclut /api/* de son contrôle) :
-// - 400  paramètre invalide
+// - 400  paramètre absent, présent deux fois, ou invalide (regex stricte)
 // - 401  non connecté (le « visiteur demandant une URL CV » est REFUSÉ ici,
 //        avant toute lecture de base)
-// - 404  candidat ou CV inexistant (aucun détail sur l'existence d'un fichier
-//        consultable : même code pour les deux cas)
-// - 403  refus de la matrice ci-dessous
+// - 404  cible ou fichier introuvable — dans UN cas comme dans l'autre :
+//        ligne absente ET clé absente (cvPath NULL) partagent le même code
+//        et le même message : AUCUNE fuite d'existence
+// - 403  refus de la matrice ci-dessous — DÉROGATION DOCUMENTÉE (revue
+//        finale M7, arbitré : conservé). Les pages M5/M6/M7 répondent
+//        404 strict ; ICI le 403 reste tel quel de la matrice d'accès
+//        M3/M4 validée à l'Étape 2 (« 403 = refus de la matrice »),
+//        verrouillée par ses tests. Conséquence assumée : 403 ⇒ « cette
+//        ligne existe et porte une pièce jointe » (oracle résiduel,
+//        derrière une session authentifiée). Dans les DEUX cas, le
+//        contenu n'est JAMAIS diffusé avant contrôle.
 //
-// MATRICE (rappel — seul l'admin est élargi par la règle « lecture
-// justifiée » ; l'annuaire recruteur supprimé n'offre aucun autre chemin) :
+// MATRICE `?candidatId=` (rappel — seul l'admin est élargi par la règle
+// « lecture justifiée » ; l'annuaire recruteur supprimé n'offre aucun autre
+// chemin) :
 // | Acteur     | Condition                                | Résultat |
 // |------------|------------------------------------------|----------|
 // | visiteur   | aucun                                     | 401      |
@@ -27,26 +43,66 @@ import { NextResponse, type NextRequest } from 'next/server'
 // | recruteur  | aucune candidature à ses offres           | 403      |
 // | admin      | toujours                                 | 302      |
 //
+// MATRICE `?candidature=` (M7) — le contrôle porte sur LA LIGNE de
+// candidature, relue en base en UNE seule requête (snapshot, propriétaire,
+// offre employeuse) :
+// | Acteur     | Condition                                       | Résultat |
+// |------------|--------------------------------------------------|----------|
+// | visiteur   | aucun                                            | 401      |
+// | candidat   | la candidature lui appartient (candidat.userId)  | 302      |
+// | candidat   | candidature d'un autre candidat                  | 403      |
+// | recruteur  | la candidature vise UNE de ses offres            | 302      |
+// | recruteur  | aucune de ses offres                             | 403      |
+// | admin      | toujours                                         | 302      |
+//
+// Journal : recruteur ou admin UNIQUEMENT, écrit AVANT toute diffusion —
+// fail-closed : sans trace, pas d'URL signée ; la cible consignée est le
+// CANDIDAT propriétaire de la ligne. Aucune écriture AuditCandidature ici
+// (le rattachement événementiel relève de V3-I).
+//
 // La redirection ne porte aucun Cache-Control par défaut sur certains
 // intermédiaires : `private, no-store` est posé sur la réponse elle-même pour
 // qu'aucun proxy ne réutilise une URL signée périmée auprès d'un autre client.
 // ---------------------------------------------------------------------------
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
-  // 1. Authentification AVANT toute lecture (aucune requête base en 401).
-  const session = await auth()
-  const userId = session?.user?.id
-  const role = session?.user?.role
-  if (typeof userId !== 'number' || !role) {
-    return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 })
-  }
+/**
+ * Entier strict positif, commun aux deux modes : la regex exclut virgules,
+ * signes et zéros initiaux que `parseInt` tronquerait silencieusement.
+ */
+const STRICT_POSITIVE_INT = /^[1-9][0-9]*$/
 
-  // 2. Paramètre strict : entier strict positif (sinon 400, pas de requête
-  //    base). La regex exclut virgules, signes et zéros initiaux que
-  //    parseInt tronquerait silencieusement.
-  const raw = request.nextUrl.searchParams.get('candidatId') ?? ''
-  if (!/^[1-9][0-9]*$/.test(raw)) {
-    return NextResponse.json({ error: 'Paramètre invalide.' }, { status: 400 })
+function jsonError(message: string, status: number): NextResponse {
+  return NextResponse.json({ error: message }, { status })
+}
+
+/**
+ * 302 vers l'URL signée de 5 minutes : aucun objet accessible publiquement,
+ * aucune URL permanente ne quitte jamais le serveur. Les en-têtes anti-cache
+ * sont posés sur la redirection elle-même (communs aux deux modes) pour
+ * qu'aucun intermédiaire ne réutilise une URL périmée auprès d'un autre client.
+ */
+async function redirectSigned(key: string, filenameBase: string): Promise<NextResponse> {
+  const { extension, contentType } = downloadMeta(key, 'pdf')
+  const url = await signDownloadUrl({
+    key,
+    filename: `${filenameBase}.${extension}`,
+    contentType,
+  })
+
+  const response = NextResponse.redirect(url, 302)
+  response.headers.set('Cache-Control', 'private, no-store, max-age=0')
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  return response
+}
+
+/**
+ * Mode `?candidatId=` — CV de PROFIL (matrice Étape 2, inchangée).
+ * `raw` est déjà connu non nul ; il reste à valider sa forme strictement.
+ */
+async function serveProfil(raw: string, userId: number, role: Role): Promise<NextResponse> {
+  // Paramètre strict : entier strict positif (sinon 400, pas de requête base).
+  if (!STRICT_POSITIVE_INT.test(raw)) {
+    return jsonError('Paramètre invalide.', 400)
   }
   const candidatId = Number.parseInt(raw, 10)
 
@@ -55,11 +111,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     select: { id: true, userId: true, cvPath: true },
   })
   if (!candidat || !candidat.cvPath) {
-    return NextResponse.json({ error: 'Fichier introuvable.' }, { status: 404 })
+    return jsonError('Fichier introuvable.', 404)
   }
 
-  // 3. Matrice d'accès — évaluation en base, jamais depuis le payload client
-  //    (un champ `role`/`id` forgeé dans la requête n'est pas lu ici).
+  // Matrice d'accès — évaluation en base, jamais depuis le payload client
+  // (un champ `role`/`id` forgeé dans la requête n'est pas lu ici).
   let allowed = false
   if (role === 'admin') {
     allowed = true
@@ -76,26 +132,95 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     allowed = candidature !== null
   }
   if (!allowed) {
-    return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 })
+    return jsonError('Accès refusé.', 403)
   }
 
-  // 4. Journal (matrice Étape 2) : recruteur ou admin UNIQUEMENT, écrit AVANT
-  //    toute diffusion — fail-closed : sans trace, pas d'URL signée.
+  // Journal (matrice Étape 2) : recruteur ou admin UNIQUEMENT, écrit AVANT
+  // toute diffusion — fail-closed : sans trace, pas d'URL signée.
   if (role !== 'candidat') {
     await logCvAccess(userId, candidat.id)
   }
 
-  // 5. URL signée de 5 minutes : aucun objet accessible publiquement, aucune
-  //    URL permanente ne quitte jamais le serveur.
-  const { extension, contentType } = downloadMeta(candidat.cvPath, 'pdf')
-  const url = await signDownloadUrl({
-    key: candidat.cvPath,
-    filename: `cv-${candidat.id}.${extension}`,
-    contentType,
-  })
+  return redirectSigned(candidat.cvPath, `cv-${candidat.id}`)
+}
 
-  const response = NextResponse.redirect(url, 302)
-  response.headers.set('Cache-Control', 'private, no-store, max-age=0')
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  return response
+/**
+ * Mode `?candidature=` — pièce jointe FIGÉE de la ligne (snapshot M7).
+ * Lecture UNIQUE : la ligne, son propriétaire et son offre employeuse sont
+ * chargés ensemble ; aucun second aller-retour ne décide du contrôle.
+ */
+async function serveCandidature(raw: string, userId: number, role: Role): Promise<NextResponse> {
+  // Même validation que `candidatId` : entier strict positif, sinon 400 sans
+  // requête base.
+  if (!STRICT_POSITIVE_INT.test(raw)) {
+    return jsonError('Paramètre invalide.', 400)
+  }
+  const candidatureId = Number.parseInt(raw, 10)
+
+  const candidature = await prisma.candidature.findUnique({
+    where: { id: candidatureId },
+    select: {
+      id: true,
+      cvPath: true,
+      candidat: { select: { id: true, userId: true } },
+      offre: { select: { entreprise: { select: { userId: true } } } },
+    },
+  })
+  // 404 strict, INDISCERNABLE : ligne absente et candidature sans pièce
+  // jointe (cvPath NULL) renvoient le même code et le même message —
+  // aucune fuite d'existence.
+  if (!candidature || !candidature.cvPath) {
+    return jsonError('Fichier introuvable.', 404)
+  }
+
+  // Matrice d'accès — évaluation en base depuis LA LIGNE, jamais depuis le
+  // payload client.
+  let allowed = false
+  if (role === 'admin') {
+    allowed = true
+  } else if (role === 'candidat') {
+    allowed = candidature.candidat.userId === userId
+  } else {
+    // recruteur : la candidature vise UNE de SES offres (entreprise du
+    // recruteur connecté) — le lien est lu sur la ligne, pas déduit.
+    allowed = candidature.offre.entreprise.userId === userId
+  }
+  if (!allowed) {
+    return jsonError('Accès refusé.', 403)
+  }
+
+  // Journal (M7, mêmes règles que le profil) : recruteur ou admin UNIQUEMENT,
+  // écrit AVANT toute diffusion — fail-closed : sans trace, pas d'URL signée.
+  // La cible consignée est le CANDIDAT propriétaire de la ligne.
+  if (role !== 'candidat') {
+    await logCvAccess(userId, candidature.candidat.id)
+  }
+
+  // Le fichier servi est le SNAPSHOT de la ligne, pas le cvPath du profil.
+  return redirectSigned(candidature.cvPath, `cv-candidature-${candidature.id}`)
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  // 1. Authentification AVANT toute lecture (aucune requête base en 401).
+  const session = await auth()
+  const userId = session?.user?.id
+  const role = session?.user?.role
+  if (typeof userId !== 'number' || !role) {
+    return jsonError('Authentification requise.', 401)
+  }
+
+  // 2. Paramètres mutuellement exclusifs : exactement UN requis. Les deux
+  //    présents ou les deux absents → même 400, sans requête base.
+  const candidatParam = request.nextUrl.searchParams.get('candidatId')
+  const candidatureParam = request.nextUrl.searchParams.get('candidature')
+  if (candidatParam !== null) {
+    if (candidatureParam !== null) {
+      return jsonError('Paramètre invalide.', 400)
+    }
+    return serveProfil(candidatParam, userId, role)
+  }
+  if (candidatureParam === null) {
+    return jsonError('Paramètre invalide.', 400)
+  }
+  return serveCandidature(candidatureParam, userId, role)
 }
