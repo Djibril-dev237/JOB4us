@@ -38,10 +38,12 @@ import type { OffreCarte, OffreDetail } from '@/lib/offres-public'
 // `Sans_experience` du blade ne sont pas portés) ; le violet badge-categorie
 // n'existe pas en tokens M2 → neutre.
 //
-// Hors périmètre (reporté en M7) : carte de candidature (postuler,
-// sauvegarder, déjà postulé, contacter le recruteur), modal de
-// candidature, détection d'état auth — la fiche reste strictement passive,
-// y compris dans l'aperçu recruteur (cf. `blocCandidature`).
+// M7 : la carte de candidature n'est PAS construite ici. La page publique
+// /offres/<slug> injecte son JSX (lien postuler / connexion) via la prop
+// `blocCandidature`, rendu en tête de la colonne droite ; l'aperçu
+// recruteur n'envoie rien → aucun bloc. La fiche reste strictement
+// passive : aucune détection d'état auth, aucun formulaire, aucune requête
+// de plus, un seul arbre pour les deux hôtes.
 //
 // A11y : hiérarchie h1 (titre) → h2 (sections) continue ; les blocs
 // d'initiales sont décoratifs (aria-hidden) — le nom de l'entreprise est
@@ -80,12 +82,14 @@ export interface FicheOffreProps {
   /** Similaires déjà chargés par l'appelant — `[]` (défaut) = section masquée. */
   similaires?: OffreCarte[]
   /**
-   * Bascule du bloc de candidature (M7) : la fiche publique l'affichera,
-   * l'aperçu recruteur non. Prop dès maintenant (et non duplication du
-   * bloc) pour que M7 n'ait qu'à le lire : la fiche du formulaire reste
-   * passive sans variante de code.
+   * Bloc de candidature (M7) : JSX de l'HÔTE, rendu tel quel en tête de la
+   * colonne droite. La page publique fournit le lien postuler / connexion
+   * selon l'état de session (auth non bloquante côté page) ; l'aperçu
+   * recruteur n'envoie rien → la colonne reste exactement celle d'avant M7.
+   * Prop JSX et non booléen : la fiche ne décide de RIEN, elle ne fait que
+   * rendre ce qu'elle reçoit — aucune variante de code, aucun état ici.
    */
-  blocCandidature?: boolean
+  blocCandidature?: ReactNode
 }
 
 /** Dates publiques figées sur le fuseau de la cible (choix M5, cf. DAL). */
@@ -101,7 +105,11 @@ const FORMATEUR_MONTANT = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 0,
 })
 
-export function FicheOffre({ offre, similaires = [] }: FicheOffreProps) {
+export function FicheOffre({
+  offre,
+  similaires = [],
+  blocCandidature,
+}: FicheOffreProps) {
   // Le public ne fournit que des enums, l'aperçu peut fournir `''` (select
   // non choisi) : on neutralise l'affichage sans toucher au reste du rendu.
   const libelleContrat =
@@ -233,10 +241,13 @@ export function FicheOffre({ offre, similaires = [] }: FicheOffreProps) {
         ) : null}
       </div>
 
-      {/* Colonne droite — le bloc candidature (postuler / sauvegarder /
-          contacter) appartient à M7 : aucune logique d'état auth ici, et
-          l'aperçu recruteur n'affichera jamais ce bloc (prop M7). */}
+      {/* Colonne droite — le bloc candidature (M7) arrive de l'HÔTE en prop
+          JSX : la page publique y met le lien postuler / connexion, l'aperçu
+          recruteur n'envoie rien (donc rien à rendre ici). Aucune logique
+          d'état auth dans la fiche : elle ne fait qu'insérer le nœud reçu. */}
       <div className="space-y-4">
+        {blocCandidature ?? null}
+
         <Card>
           <TitreSection icone={<IconInfo size={18} />}>Détails</TitreSection>
           <ul className="mt-1 divide-y divide-line">

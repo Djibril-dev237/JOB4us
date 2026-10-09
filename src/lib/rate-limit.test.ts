@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  CANDIDATURES_MAX_PAR_COMPTE,
+  CANDIDATURES_WINDOW_MS,
   MAX_WINDOW_MS,
   OFFRES_CREATION_MAX_PAR_COMPTE,
   OFFRES_CREATION_WINDOW_MS,
@@ -85,5 +87,43 @@ describe('fenêtre explicite de recordAttempt (1 h > 5 min)', () => {
       checkRateLimit(cle, OFFRES_CREATION_MAX_PAR_COMPTE, OFFRES_CREATION_WINDOW_MS)
         .allowed,
     ).toBe(true)
+  })
+})
+
+// ─── Politique de candidatures (M7) ──────────────────────────────────────────
+// Le seau `candidatures:postulation:*` reprend le calque D6 : 10
+// postulations/heure/COMPTE (clés `candidatures:postulation:*` disjoints des
+// clés M1/M5/M6), consommées uniquement après une candidature réellement
+// créée — et la MÊME exigence de fenêtre explicite à `recordAttempt`, sinon
+// son prune par défaut (5 min) tronquerait le compte à 5 min.
+
+describe('constantes M7 (plafond de postulations)', () => {
+  it('expose le contrat validé : 10 postulations par heure', () => {
+    expect(CANDIDATURES_MAX_PAR_COMPTE).toBe(10)
+    expect(CANDIDATURES_WINDOW_MS).toBe(60 * 60 * 1_000)
+  })
+
+  it("MAX_WINDOW_MS couvre la fenêtre M7 (invariant de purge de sweep())", () => {
+    // Même piège que pour D6 : sweep() ne supprime que les clés plus vieilles
+    // que MAX_WINDOW_MS. Si cette borne tombait SOUS CANDIDATURES_WINDOW_MS,
+    // un seau M7 encore actif serait purgé dès que la Map déborde de
+    // MAX_BUCKETS et le plafond 10/h deviendrait fail-open — couvert ici à
+    // l'égalité (les deux fenêtres valent 1 h).
+    expect(MAX_WINDOW_MS).toBeGreaterThanOrEqual(CANDIDATURES_WINDOW_MS)
+  })
+
+  it('conserve une tentative de 30 min quand la fenêtre 1 h est passée', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T09:00:00.000Z'))
+    const cle = 'candidatures:postulation:fenetre-explicite'
+
+    recordAttempt(cle, CANDIDATURES_WINDOW_MS)
+    vi.advanceTimersByTime(30 * 60 * 1_000)
+    recordAttempt(cle, CANDIDATURES_WINDOW_MS)
+
+    // Les DEUX tentatives sont encore dans la fenêtre d'une heure : à max=2
+    // le budget est épuisé. Sans le second argument, la première aurait été
+    // purgée au bout de 5 min et la vérification passerait.
+    expect(checkRateLimit(cle, 2, CANDIDATURES_WINDOW_MS).allowed).toBe(false)
   })
 })

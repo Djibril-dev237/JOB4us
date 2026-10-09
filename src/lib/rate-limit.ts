@@ -64,6 +64,24 @@ export const OFFRES_CREATION_MAX_PAR_COMPTE = 10
 /** Fenêtre glissante des créations d'offres M6. */
 export const OFFRES_CREATION_WINDOW_MS = 60 * 60 * 1_000
 
+// ─── Politique de candidatures (M7) ──────────────────────────────────────────
+//
+// 10 postulations par heure et par compte candidat (clé
+// `candidatures:postulation:<userId>`) : calque exact de D6 — même plafond,
+// même fenêtre glissante d'une heure, même règle de consommation
+// (`recordAttempt` APRÈS une candidature réellement créée : une tentative
+// refusée — doublon, offre indisponible, snapshot refusé — ne consomme pas
+// le budget d'une heure). Le seau est porté par le COMPTE, jamais par
+// l'offre : il borne le spam de postulations, pas l'audience d'une annonce.
+// Fenêtre ÉGALE à MAX_WINDOW_MS : l'invariant de `sweep()` reste couvert à
+// l'égalité (verrouillé dans src/lib/rate-limit.test.ts).
+
+/** Postulations max par compte candidat par fenêtre. */
+export const CANDIDATURES_MAX_PAR_COMPTE = 10
+
+/** Fenêtre glissante des postulations M7. */
+export const CANDIDATURES_WINDOW_MS = 60 * 60 * 1_000
+
 // ─── Opérations ──────────────────────────────────────────────────────────────
 
 export interface RateLimitResult {
