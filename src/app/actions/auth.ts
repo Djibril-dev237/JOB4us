@@ -18,6 +18,7 @@ import {
   type RegisterRole,
 } from '@/lib/definitions'
 import { formDataString, issuesToErrors } from '@/lib/form-errors'
+import { redirectionInterne } from '@/lib/redirect'
 import {
   LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER,
   LOGIN_MAX_ATTEMPTS_PER_IP,
@@ -97,7 +98,11 @@ export async function login(
     throw error
   }
 
-  redirect('/')
+  // Cible post-connexion : le champ caché `redirect` (posé par LoginForm
+  // depuis `?redirect=` de l'URL) est REVALIDÉ ici, côté serveur — source
+  // de vérité de l'anti open-redirect (src/lib/redirect.ts). Cible absente,
+  // externe ou malformée → `/` (aucun message, aucun oracle).
+  redirect(redirectionInterne(formDataString(formData.get('redirect'))) ?? '/')
 }
 
 // ─── Inscription ─────────────────────────────────────────────────────────────

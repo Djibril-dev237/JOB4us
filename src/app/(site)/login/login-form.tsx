@@ -13,6 +13,12 @@ interface UrlFlags {
   registered: boolean
   /** Redirection d'erreur Auth.js (?error=...), message générique. */
   authError: boolean
+  /**
+   * Cible interne après connexion (?redirect=/chemin) : transmise telle
+   * quelle au serveur, qui la REVALIDE (anti open-redirect, cf.
+   * src/lib/redirect.ts) — le client n'est jamais la source de vérité.
+   */
+  redirect: string | null
 }
 
 export function LoginForm() {
@@ -22,7 +28,11 @@ export function LoginForm() {
   // sur la page : sur Next 16.3.6, une page qui suspend sous `loading.tsx`
   // n'est jamais hydratée (vercel/next.js#98097). Lecture différée = aucun
   // écart d'hydratation possible, le bandeau apparaît au premier rendu client.
-  const [urlFlags, setUrlFlags] = useState<UrlFlags>({ registered: false, authError: false })
+  const [urlFlags, setUrlFlags] = useState<UrlFlags>({
+    registered: false,
+    authError: false,
+    redirect: null,
+  })
 
   useEffect(() => {
     // Différé d'une microtask : la lecture se fait strictement après le commit
@@ -35,6 +45,7 @@ export function LoginForm() {
       setUrlFlags({
         registered: query.get('registered') === '1',
         authError: query.has('error'),
+        redirect: query.get('redirect'),
       })
     })
     return () => {
@@ -65,6 +76,10 @@ export function LoginForm() {
           >
             {formError}
           </p>
+        )}
+
+        {urlFlags.redirect !== null && (
+          <input type="hidden" name="redirect" value={urlFlags.redirect} />
         )}
 
         <Input
