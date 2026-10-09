@@ -328,7 +328,16 @@ model Candidature {
   candidat         Candidat          @relation(fields: [candidatId], references: [id], onDelete: Cascade)
 
   @@unique([offreId, candidatId])
-  @@index([candidatId], map: "candidatures_candidat_id_fkey")
+  // M7 : l'index FK simple `candidatId` devient composite (candidatId,
+  // created_at) — même colonne de tête, donc la contrainte FK reste
+  // couverte, et la liste paginée du candidat (ORDER BY created_at DESC,
+  // 15/page) est lue depuis l'index sans filesort.
+  @@index([candidatId, createdAt], map: "candidatures_candidat_id_fkey")
+  // Filtres du recruteur : WHERE offre_id = ? AND statut = ? — l'index
+  // unique (offre_id, candidat_id) filtre offre_id mais pas statut (2e
+  // axe d'égalité très sélectif : 'envoyee' domine) ; created_at en
+  // troisième pour le tri de la liste.
+  @@index([offreId, statut, createdAt], map: "candidatures_offre_statut_idx")
   @@map("candidatures")
 }
 
@@ -359,12 +368,48 @@ model AccesFichier {
   @@map("acces_fichiers")
 }
 
+// ---------------------------------------------------------------------------
+// JOURNAL D'AUDIT DES CANDIDATURES (M7, tâche 11 : « qui a changé quel
+// statut, quand ») — même doctrine que AccesFichier, ci-dessus :
+// - AUCUNE clé étrangère : la trace survit à la suppression d'un compte et
+//   à la suppression physique d'une ligne (intégrité d'audit > intégrité
+//   référentielle) ;
+// - pas d'updatedAt : table en ajout pur, jamais mise à jour ;
+// - `action` = nature de l'événement (création, transition, retrait,
+//   consultation de CV), `ancienStatut` NULL pour la création.
+// Les transitions sont journées UNIQUEMENT par l'action serveur
+// (aucun chemin client ne peut écrire ici : la table n'a pas de route).
+model AuditCandidature {
+  id             Int      @id @default(autoincrement())
+  candidatureId  Int      @map("candidature_id")
+  acteurId       Int      @map("acteur_id")
+  action         String   @db.VarChar(50)
+  ancienStatut   String?  @map("ancien_statut") @db.VarChar(30)
+  nouveauStatut  String?  @map("nouveau_statut") @db.VarChar(30)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([candidatureId], map: "audit_candidatures_candidature_id_idx")
+  @@index([acteurId], map: "audit_candidatures_acteur_id_idx")
+  @@index([createdAt], map: "audit_candidatures_created_at_idx")
+  @@map("audit_candidatures")
+}
+
+// M7 / étape 2 validée — 7 statuts remplacent l'ENUM 5 valeurs du legacy
+// ('envoyee','vue','retenue','refusee','entretien') : `vue` → `consultee`,
+// `retenue` → `preselectionnee` (terminologie validée), `acceptee` n'existait
+// pas (le legacy s'arrêtait à `retenue`), `retiree` remplace la SUPPRESSION
+// PHYSIQUE du legacy (diagnostic #11 : perte d'historique) — conformément à
+// schema.prisma « l'historique M7 doit survivre ». L'ENUM MySQL garantit la
+// liste en base ; les TRANSITIONS sont contrôlées côté serveur
+// (src/lib/candidatures-labels.ts, testé exhaustivement).
 enum StatutCandidature {
   envoyee
-  vue
-  retenue
-  refusee
+  consultee
+  preselectionnee
   entretien
+  acceptee
+  refusee
+  retiree
 
   @@map("candidatures_statut")
 }

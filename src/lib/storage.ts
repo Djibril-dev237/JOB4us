@@ -3,6 +3,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
@@ -87,7 +88,7 @@ function s3(): { client: S3Client; bucket: string } {
  * base fuyait, aucune adresse de fichier ne serait déductible.
  */
 export function generateKey(
-  prefix: 'cvs' | 'avatars' | 'logos',
+  prefix: 'cvs' | 'avatars' | 'logos' | 'candidatures',
   extension: string,
 ): string {
   const ext = extension.toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -113,6 +114,42 @@ export async function putPrivateObject(
       Body: body,
       ContentType: contentType,
       CacheControl: 'private, no-store, max-age=0',
+    }),
+  )
+}
+
+/**
+ * Copie un objet privé vers une NOUVELLE clé (M7, snapshot de CV par
+ * candidature) : le fichier reste dans le même bucket privé, sans ACL ni
+ * URL publique. `MetadataDirective: 'REPLACE'` + `ContentType` imposé :
+ * les en-têtes de sécurité (`private, no-store`, MIME explicite) ne
+ * dépendent pas de la configuration de l'objet source — un fichier hérité
+ * de la migration legacy ne peut pas réintroduire un cache partageable.
+ * La clé cible est GENÉRÉE PAR LE SERVEUR (generateKey) : jamais dérivée
+ * d'un identifiant client. À n'invoquer QU'après vérification que la
+ * source appartient bien au candidat qui poste.
+ */
+export async function copyPrivateObject(
+  sourceKey: string,
+  targetKey: string,
+  contentType: string,
+): Promise<void> {
+  const { client, bucket } = s3()
+  // Le CopySource S3 s'écrit « bucket/clé » avec la clé encodée segment
+  // par segment (les « / » restent littéraux, tout autre caractère est
+  // percent-encodé : pas de traversée de chemin ni d'interprétation).
+  const encodedKey = sourceKey
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      CopySource: `${bucket}/${encodedKey}`,
+      Key: targetKey,
+      ContentType: contentType,
+      CacheControl: 'private, no-store, max-age=0',
+      MetadataDirective: 'REPLACE',
     }),
   )
 }
