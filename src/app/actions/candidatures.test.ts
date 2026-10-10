@@ -36,13 +36,20 @@ import {
 //    d'`updateMany`, jamais une lecture puis une écriture pour le verdict ;
 // 4. anti mass-assignment : `statut`, `offreId`, `candidatId`, `cvPath` ne
 //    sortent JAMAIS du payload ;
-// 5. seau M7 consommé UNIQUEMENT après une candidature réellement créée.
+// 5. seau M7 consommé UNIQUEMENT après une candidature réellement créée ;
+// 6. l’écriture d’audit (`AuditCandidature`) est ATOMIQUE avec la mutation
+//    (MÊME `$transaction`, seulement si le CAS réussit), acteur =
+//    `session.userId`, jamais branchée sur les hooks M8/M9.
 // Aucune donnée réelle : prisma, dal, offres-public, candidature-cv,
 // rate-limit, les hooks d'événements et next/navigation sont mockés
 // (redirect/notFound lèvent pour que le flux s'arrête comme en prod).
+// Le module d’audit (src/lib/candidature-audit.ts) n’est PAS mocké : il
+// tourne pour de vrai sur le prisma simulé, donc les assertions portent sur
+// le payload RÉELLEMENT passé à `auditCandidature.create`.
 // ---------------------------------------------------------------------------
 
 const {
+  auditCandidatureCreate,
   candidatureCreate,
   candidatureFindUnique,
   candidatureFindFirst,
@@ -51,6 +58,7 @@ const {
   offreFindUnique,
   transaction,
 } = vi.hoisted(() => ({
+  auditCandidatureCreate: vi.fn(),
   candidatureCreate: vi.fn(),
   candidatureFindUnique: vi.fn(),
   candidatureFindFirst: vi.fn(),
@@ -70,6 +78,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     candidat: { findUnique: candidatFindUnique },
     offre: { findUnique: offreFindUnique },
+    auditCandidature: { create: auditCandidatureCreate },
     $transaction: transaction,
   },
 }))
@@ -123,11 +132,13 @@ vi.mock('next/navigation', () => ({
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 /**
- * Client transmis au callback de `$transaction` : le même spy sert DANS la
- * transaction, ce qui prouve que l'action ne passe que par le tx pour créer.
+ * Client transmis au callback de `$transaction` : les MÊMES spies servent
+ * DANS la transaction, ce qui prouve que l’action ne passe que par le tx pour
+ * créer, muter et journaliser (audit inclus).
  */
 const TX = {
-  candidature: { create: candidatureCreate },
+  candidature: { create: candidatureCreate, updateMany: candidatureUpdateMany },
+  auditCandidature: { create: auditCandidatureCreate },
 }
 
 const USER_ID = 42
@@ -202,7 +213,12 @@ beforeEach(() => {
   candidatFindUnique.mockResolvedValue({ id: CANDIDAT_ID })
   offreFindUnique.mockResolvedValue({ id: OFFRE_ID })
   candidatureCreate.mockResolvedValue({ id: CANDIDATURE_ID })
-  candidatureFindUnique.mockResolvedValue({ offreId: OFFRE_ID, candidatId: CANDIDAT_ID })
+  // `statut` sert d’ancien statut à l’audit `retrait` (lecture de contrôle).
+  candidatureFindUnique.mockResolvedValue({
+    offreId: OFFRE_ID,
+    candidatId: CANDIDAT_ID,
+    statut: 'envoyee',
+  })
   candidatureFindFirst.mockResolvedValue({
     statut: 'envoyee',
     offreId: OFFRE_ID,
@@ -273,6 +289,45 @@ describe('postulerOffre', () => {
     )
 
     expect(annulerSnapshotCv).toHaveBeenCalledWith(CLE_SNAPSHOT)
+    expect(recordAttempt).not.toHaveBeenCalled()
+    expect(candidatureEnvoyee).not.toHaveBeenCalled()
+    // La création a échoué AVANT l’audit : AUCUNE ligne d’audit.
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
+  })
+
+  it('écrit la ligne d’audit `creation` (acteur = USER_ID, jamais CANDIDAT_ID) APRÈS le create et AVANT recordAttempt', async () => {
+    await attendRedirection(
+      postulerOffre(formOf(FORM_POSTULATION)),
+      `/offres/${SLUG}/postuler?maj=envoyee`,
+    )
+
+    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
+    expect(auditCandidatureCreate).toHaveBeenCalledWith({
+      data: {
+        candidatureId: CANDIDATURE_ID,
+        acteurId: USER_ID,
+        action: 'creation',
+        ancienStatut: null,
+        nouveauStatut: 'envoyee',
+      },
+    })
+    // Même client transactionnel que le create (atomicité fail-closed).
+    expect(transaction).toHaveBeenCalledTimes(1)
+    // Ordre imposé : create → audit → consommation du seau.
+    const ordreCreate = candidatureCreate.mock.invocationCallOrder[0] ?? 0
+    const ordreAudit = auditCandidatureCreate.mock.invocationCallOrder[0] ?? 0
+    const ordreSeau = vi.mocked(recordAttempt).mock.invocationCallOrder[0] ?? 0
+    expect(ordreAudit).toBeGreaterThan(ordreCreate)
+    expect(ordreSeau).toBeGreaterThan(ordreAudit)
+  })
+
+  it("échec d’audit : rollback complet (snapshot annulé), re-throw, AUCUN redirect", async () => {
+    auditCandidatureCreate.mockRejectedValueOnce(new Error('AUDIT_DOWN'))
+
+    await expect(postulerOffre(formOf(FORM_POSTULATION))).rejects.toThrow('AUDIT_DOWN')
+
+    expect(annulerSnapshotCv).toHaveBeenCalledWith(CLE_SNAPSHOT)
+    expect(redirect).not.toHaveBeenCalled()
     expect(recordAttempt).not.toHaveBeenCalled()
     expect(candidatureEnvoyee).not.toHaveBeenCalled()
   })
@@ -417,7 +472,7 @@ describe('retirerCandidature', () => {
 
     expect(candidatureFindUnique).toHaveBeenCalledWith({
       where: { id: CANDIDATURE_ID },
-      select: { offreId: true, candidatId: true },
+      select: { offreId: true, candidatId: true, statut: true },
     })
     expect(candidatureUpdateMany).toHaveBeenCalledTimes(1)
     expect(whereUpdateMany()).toEqual({
@@ -435,6 +490,31 @@ describe('retirerCandidature', () => {
     })
   })
 
+  it("écrit l’audit `retrait` (même transaction) avec le statut LU en contrôle", async () => {
+    candidatureFindUnique.mockResolvedValue({
+      offreId: OFFRE_ID,
+      candidatId: CANDIDAT_ID,
+      statut: 'consultee',
+    })
+
+    await attendRedirection(
+      retirerCandidature(formOf(FORM_RETRAIT)),
+      '/candidat/candidatures?maj=retiree',
+    )
+
+    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
+    expect(auditCandidatureCreate).toHaveBeenCalledWith({
+      data: {
+        candidatureId: CANDIDATURE_ID,
+        acteurId: USER_ID,
+        action: 'retrait',
+        ancienStatut: 'consultee',
+        nouveauStatut: 'retiree',
+      },
+    })
+    expect(transaction).toHaveBeenCalledTimes(1)
+  })
+
   it('compte à zéro (ligne déjà terminale, déjà retirée, double clic) : ?erreur=retrait', async () => {
     candidatureUpdateMany.mockResolvedValue({ count: 0 })
 
@@ -447,6 +527,8 @@ describe('retirerCandidature', () => {
       statut: { notIn: ['acceptee', 'refusee', 'retiree'] },
     })
     expect(candidatureRetiree).not.toHaveBeenCalled()
+    // CAS à zéro : aucune mutation, donc AUCUNE ligne d’audit.
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it("répond 404 pour une candidature d'un AUTRE candidat, sans écrire", async () => {
@@ -455,6 +537,7 @@ describe('retirerCandidature', () => {
     await attend404(retirerCandidature(formOf(FORM_RETRAIT)))
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(candidatureRetiree).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it('refuse un id absent ou mal formé par le MÊME 404 qu’une ligne absente', async () => {
@@ -510,6 +593,18 @@ describe('changerStatutCandidature', () => {
       nouveauStatut: 'consultee',
       acteurId: USER_ID,
     })
+    // Audit `transition` : MÊME transaction que le CAS, acteur = session.
+    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
+    expect(auditCandidatureCreate).toHaveBeenCalledWith({
+      data: {
+        candidatureId: CANDIDATURE_ID,
+        acteurId: USER_ID,
+        action: 'transition',
+        ancienStatut: 'envoyee',
+        nouveauStatut: 'consultee',
+      },
+    })
+    expect(transaction).toHaveBeenCalledTimes(1)
     // `?maj=statut` n'a AUCUN message (fail-closed : le badge à jour relu par
     // la page est le feedback) — une clé porteuse de texte reste contrôlée.
     expect(messageMajCandidature('statut')).toBeNull()
@@ -530,6 +625,7 @@ describe('changerStatutCandidature', () => {
 
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(statutChange).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
     // La clé du refus a bien un libellé contrôlé (source unique, fail-closed).
     expect(messageErreurCandidature('transition')).toBe(
       "Ce changement de statut n'est pas autorisé.",
@@ -542,6 +638,7 @@ describe('changerStatutCandidature', () => {
     await attend404(changerStatutCandidature(formOf(FORM_TRANSITION)))
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(statutChange).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it('refuse une cible hors des 7 statuts par le MÊME refus ?erreur=transition', async () => {
@@ -552,6 +649,7 @@ describe('changerStatutCandidature', () => {
 
     expect(candidatureFindFirst).not.toHaveBeenCalled()
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it('CAS à zéro (double clic, écriture concurrente) : ?erreur=transition', async () => {
@@ -564,6 +662,7 @@ describe('changerStatutCandidature', () => {
 
     expect(whereUpdateMany()).toMatchObject({ statut: 'envoyee' })
     expect(statutChange).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it("l'admin n'a aucun périmètre (findUnique sans jointure) mais reste soumis à la matrice", async () => {
@@ -588,6 +687,16 @@ describe('changerStatutCandidature', () => {
     expect(candidatureFindFirst).not.toHaveBeenCalled()
     // Aucune jointure d'ownership dans le CAS d'un admin.
     expect(whereUpdateMany()).toEqual({ id: CANDIDATURE_ID, statut: 'acceptee' })
+    // Audit : ancien = statut LU en contrôle, nouveau = cible du formulaire.
+    expect(auditCandidatureCreate).toHaveBeenCalledWith({
+      data: {
+        candidatureId: CANDIDATURE_ID,
+        acteurId: USER_ID,
+        action: 'transition',
+        ancienStatut: 'acceptee',
+        nouveauStatut: 'retiree',
+      },
+    })
   })
 
   it('exige recruteur OU admin EN PREMIER', async () => {
@@ -620,6 +729,8 @@ describe('marquerConsultee', () => {
     // Garde d'autorisation : POST direct non authentifié → aucune écriture.
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(statutChange).not.toHaveBeenCalled()
+    // L’audit ne s’écrit même pas sans session : pas de mutation, pas de trace.
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it('passe envoyee → consultee par un CAS exact SCOPE au compte recruteur', async () => {
@@ -635,6 +746,18 @@ describe('marquerConsultee', () => {
       data: { statut: 'consultee' },
     })
     expect(statutChange).not.toHaveBeenCalled()
+    // Audit `transition` automatique : acteur = le compte de la session.
+    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
+    expect(auditCandidatureCreate).toHaveBeenCalledWith({
+      data: {
+        candidatureId: CANDIDATURE_ID,
+        acteurId: USER_ID,
+        action: 'transition',
+        ancienStatut: 'envoyee',
+        nouveauStatut: 'consultee',
+      },
+    })
+    expect(transaction).toHaveBeenCalledTimes(1)
   })
 
   it('admin : périmètre global (lecture/transition admin sans jointure)', async () => {
@@ -659,6 +782,17 @@ describe('marquerConsultee', () => {
 
     await expect(marquerConsultee(CANDIDATURE_ID)).resolves.toBeUndefined()
     expect(statutChange).not.toHaveBeenCalled()
+    // Pas de mutation → AUCUNE ligne d’audit (jamais de trace orpheline).
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
+  })
+
+  it("échec d’audit : best-effort ATOMIQUE conservé (aucune exception propagée)", async () => {
+    auditCandidatureCreate.mockRejectedValueOnce(new Error('AUDIT_DOWN'))
+
+    await expect(marquerConsultee(CANDIDATURE_ID)).resolves.toBeUndefined()
+    // Le rollback de la transaction est absorbé : la page ne casse jamais.
+    expect(redirect).not.toHaveBeenCalled()
+    expect(statutChange).not.toHaveBeenCalled()
   })
 })
 
@@ -678,5 +812,24 @@ describe("hooks d'événements", () => {
         acteurId: 9,
       }),
     ).not.toThrow()
+  })
+
+  it("aucun lien entre les hooks M8/M9 et l’audit : ils restent sans effet", () => {
+    const base = { candidatureId: CANDIDATURE_ID, offreId: OFFRE_ID, candidatId: CANDIDAT_ID }
+
+    candidatureEnvoyee(base)
+    candidatureRetiree(base)
+    statutChange({
+      ...base,
+      ancienStatut: 'envoyee',
+      nouveauStatut: 'consultee',
+      acteurId: USER_ID,
+    })
+
+    // Un hook appelé n’écrit JAMAIS `AuditCandidature` : l’audit ne vit que
+    // dans les actions et dans la route CV (src/lib/candidature-audit.ts).
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
+    expect(candidatureCreate).not.toHaveBeenCalled()
+    expect(candidatureUpdateMany).not.toHaveBeenCalled()
   })
 })

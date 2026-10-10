@@ -19,7 +19,7 @@ import type { StatutCandidature } from '@prisma/client'
 //    complète : le futur destinataire relira lui-même la base s'il en a
 //    besoin (aucune donnée personnelle ne stagne dans un événement).
 //
-// Aucune ligne d'audit n'est écrite ici (AuditCandidature appartient à V3-I).
+// Aucune ligne d’audit n’est écrite ici (cf. src/lib/candidature-audit.ts).
 // ---------------------------------------------------------------------------
 
 /** Charge utile commune : quelle candidature, pour quelle offre, de quel candidat. */

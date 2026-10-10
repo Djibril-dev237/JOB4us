@@ -3,6 +3,12 @@
 import { Prisma } from '@prisma/client'
 import { notFound, redirect } from 'next/navigation'
 
+import {
+  ACTION_AUDIT_CREATION,
+  ACTION_AUDIT_RETRAIT,
+  ACTION_AUDIT_TRANSITION,
+  journaliserCandidature,
+} from '@/lib/candidature-audit'
 import { annulerSnapshotCv, preparerSnapshotCv } from '@/lib/candidature-cv'
 import {
   STATUTS_TERMINAUX,
@@ -48,8 +54,9 @@ import { estSlugOffreValide } from '@/lib/slug'
 //   source DANS le `where` (périmètre + statut courant) — jamais une lecture
 //   PUIS une écriture. Les lectures de contrôle ci-dessous (ownership de la
 //   ligne, `offreId` de l'événement, statut courant de la matrice) servent à
-//   mourir en 404 et à CONSTRUIRE l'événement ; la décision, elle, appartient
-//   au CAS : `count === 0` → refus, y compris sur un double clic.
+//   mourir en 404 et à CONSTRUIRE l'événement et l'audit ; la décision,
+//   elle, appartient au CAS : `count === 0` → refus, y compris sur un double
+//   clic.
 // * ANTI MASS-ASSIGNMENT : le FormData est lu PAR CLÉS (`formDataString` /
 //   `formDataFile`) puis validé par `schemaPostulation` /
 //   `schemaChangementStatut`, tous deux `.strict()` : `statut`, `offreId`,
@@ -70,9 +77,20 @@ import { estSlugOffreValide } from '@/lib/slug'
 //   (?maj=envoyee remplace le formulaire) et les bandeaux d'erreur ; le
 //   retrait vers la liste du candidat, le changement de statut vers la
 //   liste du recruteur (qui hébergent les bandeaux ?maj=/?erreur=).
-// * AUDIT : AUCUNE ligne d'audit n'est écrite ici (AuditCandidature, V3-I) —
-//   les 3 hooks de src/lib/evenements-candidature.ts sont le point de
-//   branchement des modules M8/M9.
+// * AUDIT : les 4 actions écrivent `AuditCandidature` VIA
+//   src/lib/candidature-audit.ts (constantes source `ACTION_AUDIT_*` + type
+//   union strict) — `creation` (postulerOffre), `retrait`
+//   (retirerCandidature), `transition` (changerStatutCandidature ET le
+//   passage auto `envoyee → consultee` de marquerConsultee). Politique
+//   verrouillée : acteur = `session.userId` PARTOUT (jamais `candidat.id`,
+//   cohérent avec logCvAccess) ; création / retrait / transition sont
+//   ATOMIQUES avec la mutation (fail-closed) — la ligne d’audit vit dans la
+//   MÊME `$transaction`, seulement si la création ou le CAS réussit
+//   (`count === 1`), donc un échec d’audit ANNULE la mutation ; AUCUN audit
+//   sur un refus (P2002, `?erreur=`, 404). marquerConsultee reste
+//   best-effort : son try/catch absorbe l’échec d’audit. Les 3 hooks de
+//   src/lib/evenements-candidature.ts restent le point de branchement M8/M9,
+//   sans lien avec l’audit (cf. src/lib/candidature-audit.ts).
 // ---------------------------------------------------------------------------
 
 /** Clé du seau M7 : partagée par le COMPTE, jamais par l'offre (calque D6). */
@@ -111,10 +129,14 @@ async function candidatDuCompte(userId: number): Promise<number> {
   return candidat.id
 }
 
-/** Lecture de contrôle du retrait : alimente l'événement (offreId). */
+/**
+ * Lecture de contrôle du retrait : alimente l’événement M8/M9 (`offreId`) et
+ * l’audit (`statut` = ancien statut consigné dans `AuditCandidature`).
+ */
 const SELECT_CONTROLE_RETRAIT = {
   offreId: true,
   candidatId: true,
+  statut: true,
 } satisfies Prisma.CandidatureSelect
 
 /** Lecture de contrôle de la transition : périmètre + statut courant (matrice). */
@@ -128,7 +150,8 @@ const SELECT_CONTROLE_TRANSITION = {
  * POSTULER à une offre publique (candidat).
  *
  * Ordre IMPÉRATIF : 1) rôle → 2) seau M7 → 3) offre → 4) candidat →
- * 5) payload (`schemaPostulation`) → 6) snapshot CV → 7) écriture →
+ * 5) payload (`schemaPostulation`) → 6) snapshot CV → 7) écriture (la
+ * candidature ET sa ligne d’audit `creation`, même `$transaction`) →
  * 8) `recordAttempt` + événement + redirect.
  *
  * Deux décisions à documenter :
@@ -230,9 +253,12 @@ export async function postulerOffre(formData: FormData): Promise<void> {
   const cvPath = snapshot.cle
 
   // 7) Écriture : liste blanche stricte, SANS statut (défaut `envoyee`), sans
-  //    autre champ. Le rollback du snapshot vit HORS transaction, autour du
-  //    `$transaction` : le create peut avoir échoué APRÈS la copie de
-  //    l'objet.
+  //    autre champ — puis la ligne d’audit `creation`, dans la MÊME
+  //    transaction et APRÈS la création (fail-closed : si l’audit échoue, la
+  //    candidature est annulée avec lui). Le rollback du snapshot vit HORS
+  //    transaction, autour du `$transaction` : le create peut avoir échoué
+  //    APRÈS la copie de l’objet, et un échec d’audit roule entier — le
+  //    catch ci-dessous absorbe les DEUX (aucune logique à dupliquer).
   let candidatureId: number
   try {
     candidatureId = await prisma.$transaction(async (tx) => {
@@ -244,6 +270,13 @@ export async function postulerOffre(formData: FormData): Promise<void> {
           cvPath,
         },
       })
+      await journaliserCandidature(tx, {
+        candidatureId: creee.id,
+        acteurId: session.userId,
+        action: ACTION_AUDIT_CREATION,
+        ancienStatut: null,
+        nouveauStatut: 'envoyee',
+      })
       return creee.id
     })
   } catch (erreur) {
@@ -251,7 +284,8 @@ export async function postulerOffre(formData: FormData): Promise<void> {
     await annulerSnapshotCv(cvPath)
     if (erreur instanceof Prisma.PrismaClientKnownRequestError && erreur.code === 'P2002') {
       // Unicité DB (offreId, candidatId) : double clic / double onglet —
-      // la ligne existe déjà, la tentative ne consomme PAS le seau.
+      // la ligne existe déjà, la tentative ne consomme PAS le seau, et
+      // l’audit `creation` n’a JAMAIS été écrit (création échouée avant).
       redirect(`/offres/${slug}/postuler?erreur=doublon`)
     }
     throw erreur
@@ -269,15 +303,17 @@ export async function postulerOffre(formData: FormData): Promise<void> {
  * physique du legacy (la ligne et son historique M7 survivent).
  *
  * Ordre : rôle → candidat du compte → id (404) → lecture de contrôle →
- * compare-and-set.
+ * compare-and-set + audit `retrait` (MÊME `$transaction`, fail-closed).
  *
- * La `findUnique` de contrôle ne sert QU'à alimenter l'événement (`offreId`)
- * et à mourir en 404 pour une ligne d'autrui : le VERDICT reste le CAS
- * ci-dessous, dont le `where` porte à la fois `candidatId` ET l'exclusion des
- * statuts terminaux. Deux verdicts distincts, aucun oracle (P3-1 revue
- * M7) : ligne inexistante OU d'un autre candidat → `notFound()` (404
+ * La `findUnique` de contrôle ne sert QU'à alimenter l'événement (`offreId`),
+ * l’audit (`statut` = ancien statut consigné) et à mourir en 404 pour une
+ * ligne d'autrui : le VERDICT reste le CAS ci-dessous, dont le `where` porte
+ * à la fois `candidatId` ET l'exclusion des statuts terminaux. Deux verdicts
+ * distincts, aucun oracle (P3-1 revue M7) : ligne inexistante OU d'un autre
+ * candidat → `notFound()` (404
  * strict, doctrine M7) ; ligne existante mais déjà terminale →
  * `?erreur=retrait` : refus de formulaire, jamais une fuite d'existence.
+ * `count === 0` n’écrit AUCUNE ligne d’audit (jamais de trace sans mutation).
  */
 export async function retirerCandidature(formData: FormData): Promise<void> {
   const session = await verifyRole('candidat')
@@ -294,13 +330,28 @@ export async function retirerCandidature(formData: FormData): Promise<void> {
     notFound()
   }
 
-  const resultat = await prisma.candidature.updateMany({
-    // CAS : périmètre + exclusion des terminaux DANS le `where`, jamais une
-    // lecture de statut suivie d'une écriture.
-    where: { id, candidatId, statut: { notIn: [...STATUTS_TERMINAUX] } },
-    data: { statut: 'retiree' },
+  // CAS + audit ATOMIQUES : la mutation et sa ligne `retrait` partagent la
+  // MÊME $transaction — `count === 0` → ni l’une ni l’autre (aucune trace
+  // sans mutation), et un échec d’audit roule la mise à jour entière.
+  const resultat = await prisma.$transaction(async (tx) => {
+    const verdict = await tx.candidature.updateMany({
+      // CAS : périmètre + exclusion des terminaux DANS le `where`, jamais une
+      // lecture de statut suivie d'une écriture.
+      where: { id, candidatId, statut: { notIn: [...STATUTS_TERMINAUX] } },
+      data: { statut: 'retiree' },
+    })
+    if (verdict.count === 1) {
+      await journaliserCandidature(tx, {
+        candidatureId: id,
+        acteurId: session.userId,
+        action: ACTION_AUDIT_RETRAIT,
+        ancienStatut: ligne.statut,
+        nouveauStatut: 'retiree',
+      })
+    }
+    return verdict.count
   })
-  if (resultat.count === 0) {
+  if (resultat === 0) {
     redirect('/candidat/candidatures?erreur=retrait')
   }
 
@@ -312,7 +363,8 @@ export async function retirerCandidature(formData: FormData): Promise<void> {
  * CHANGER le statut d'une candidature (recruteur OU admin).
  *
  * Ordre imposé : 1) rôle → 2) id → 3) cible (schéma) → 4) ownership + statut
- * courant EN UNE requête → 5) matrice → 6) CAS → 7) événement + redirect.
+ * courant EN UNE requête → 5) matrice → 6) CAS + audit `transition` (MÊME
+ * `$transaction`, fail-closed) → 7) événement + redirect.
  *
  * Le recruteur est borné par la jointure `offre → entreprise → userId` posée
  * DANS le `where` de la lecture ET dans celui du CAS ; l'admin, lui, n'a
@@ -359,20 +411,35 @@ export async function changerStatutCandidature(formData: FormData): Promise<void
     redirect('/recruteur/candidatures?erreur=transition')
   }
 
-  // 6) Compare-and-set : statut source + périmètre DANS le `where` — une
-  //    écriture concurrente (ou un double clic) ne trouve plus la source et
-  //    se heurte au MÊME refus.
-  const resultat = await prisma.candidature.updateMany({
-    where: {
-      id,
-      statut: ligne.statut,
-      ...(acteur === 'recruteur'
-        ? { offre: { entreprise: { userId: session.userId } } }
-        : {}),
-    },
-    data: { statut: vers },
+  // 6) Compare-and-set + audit ATOMIQUES : statut source + périmètre DANS le
+  //    `where` — une écriture concurrente (ou un double clic) ne trouve plus
+  //    la source et se heurte au MÊME refus. L’audit `transition` n’est écrit
+  //    QUE si le CAS a touché la ligne (`count === 1`) ; un échec d’audit
+  //    roule la mise à jour entière (fail-closed : aucune transition sans
+  //    trace), et un refus (interdit, 404, CAS à zéro) n’écrit rien.
+  const resultat = await prisma.$transaction(async (tx) => {
+    const verdict = await tx.candidature.updateMany({
+      where: {
+        id,
+        statut: ligne.statut,
+        ...(acteur === 'recruteur'
+          ? { offre: { entreprise: { userId: session.userId } } }
+          : {}),
+      },
+      data: { statut: vers },
+    })
+    if (verdict.count === 1) {
+      await journaliserCandidature(tx, {
+        candidatureId: id,
+        acteurId: session.userId,
+        action: ACTION_AUDIT_TRANSITION,
+        ancienStatut: ligne.statut,
+        nouveauStatut: vers,
+      })
+    }
+    return verdict.count
   })
-  if (resultat.count === 0) {
+  if (resultat === 0) {
     redirect('/recruteur/candidatures?erreur=transition')
   }
 
@@ -412,20 +479,35 @@ export async function changerStatutCandidature(formData: FormData): Promise<void
  * le DAL, et une ligne dont le statut a changé entre-temps n'est simplement
  * pas touchée (`count === 0` ignoré).
  *
- * Aucun événement (V3-I branchera l'audit sur cette page).
+ * Aucun hook M8/M9 ici (cette page n’en déclenche aucun) ; l’audit
+ * `transition` (`envoyee → consultee`, acteur = `session.userId`, le compte
+ * recruteur/admin dont la session a ouvert la page) s’écrit DANS la
+ * `$transaction`, sur le CAS ci-dessous : best-effort ATOMIQUE — un échec
+ * d’audit annule d’abord la mutation, puis est absorbé par le try/catch.
  */
 export async function marquerConsultee(candidatureId: number): Promise<void> {
   try {
     const session = await verifyRole('recruteur', 'admin')
-    await prisma.candidature.updateMany({
-      where: {
-        id: candidatureId,
-        statut: 'envoyee',
-        ...(session.role === 'recruteur'
-          ? { offre: { entreprise: { userId: session.userId } } }
-          : {}),
-      },
-      data: { statut: 'consultee' },
+    await prisma.$transaction(async (tx) => {
+      const verdict = await tx.candidature.updateMany({
+        where: {
+          id: candidatureId,
+          statut: 'envoyee',
+          ...(session.role === 'recruteur'
+            ? { offre: { entreprise: { userId: session.userId } } }
+            : {}),
+        },
+        data: { statut: 'consultee' },
+      })
+      if (verdict.count === 1) {
+        await journaliserCandidature(tx, {
+          candidatureId,
+          acteurId: session.userId,
+          action: ACTION_AUDIT_TRANSITION,
+          ancienStatut: 'envoyee',
+          nouveauStatut: 'consultee',
+        })
+      }
     })
   } catch {
     // Best-effort : jamais d'exception propagée, jamais de log.

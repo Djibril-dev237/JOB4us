@@ -32,14 +32,14 @@ type CandidatureLu = {
   offre: { entreprise: { userId: number } }
 }
 
-const { authMock, candidatFindUnique, candidatureFindFirst, candidatureFindUnique } = vi.hoisted(
-  () => ({
+const { authMock, auditCandidatureCreate, candidatFindUnique, candidatureFindFirst, candidatureFindUnique } =
+  vi.hoisted(() => ({
     authMock: vi.fn<() => Promise<MockSession | null>>(),
+    auditCandidatureCreate: vi.fn(),
     candidatFindUnique: vi.fn<() => Promise<CandidatLu | null>>(),
     candidatureFindFirst: vi.fn<() => Promise<{ id: number } | null>>(),
     candidatureFindUnique: vi.fn<() => Promise<CandidatureLu | null>>(),
-  }),
-)
+  }))
 
 vi.mock('@/auth', () => ({ auth: authMock }))
 vi.mock('@/lib/prisma', () => ({
@@ -50,6 +50,7 @@ vi.mock('@/lib/prisma', () => ({
       findUnique: candidatureFindUnique,
     },
     accesFichier: { create: vi.fn() },
+    auditCandidature: { create: auditCandidatureCreate },
   },
 }))
 vi.mock('@/lib/audit')
@@ -155,6 +156,7 @@ describe('GET /api/files/cv — candidat (lignes 2-3)', () => {
     })
     // Le propriétaire n'est pas un événement sensible (matrice Étape 2).
     expect(logCvAccess).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
     expect(candidatureFindFirst).not.toHaveBeenCalled()
   })
 
@@ -187,6 +189,8 @@ describe('GET /api/files/cv — recruteur (lignes 4-5)', () => {
     })
     // Journal : recruteur/admin uniquement, AVANT diffusion (fail-closed).
     expect(logCvAccess).toHaveBeenCalledWith(3, 5)
+    // Mode PROFIL : AUCUNE ligne d'audit (aucun candidatureId possible).
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it("refuse si aucune candidature à ses offres (403), sans journal", async () => {
@@ -223,6 +227,8 @@ describe('GET /api/files/cv — admin (ligne 6)', () => {
     expect(response.status).toBe(302)
     expect(logCvAccess).toHaveBeenCalledWith(1, 5)
     expect(candidatureFindFirst).not.toHaveBeenCalled()
+    // Mode PROFIL : l'audit de candidature n'écrit jamais ici.
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 })
 
@@ -270,8 +276,10 @@ describe('GET /api/files/cv — pièce jointe de candidature (lignes M7)', () =>
       select: SELECT_CANDIDATURE,
     })
     expect(candidatFindUnique).not.toHaveBeenCalled()
-    // Le propriétaire n'est pas un événement sensible.
+    // Le propriétaire n'est pas un événement sensible : AUCUNE écriture
+    // AuditCandidature (politique identique à logCvAccess).
     expect(logCvAccess).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it("refuse la candidature d'un autre candidat : 403, sans journal ni signature", async () => {
@@ -368,6 +376,72 @@ describe('GET /api/files/cv — pièce jointe de candidature (lignes M7)', () =>
     expect(response.status).toBe(404)
     expect(signDownloadUrl).not.toHaveBeenCalled()
     expect(logCvAccess).not.toHaveBeenCalled()
+  })
+})
+
+// ─── V3-I : ligne `consultation` du journal AuditCandidature ─────────────────
+// Écrite PAR LE MÊME couple (recruteur/admin, mode `?candidature=`) que le
+// journal d'accès, mais rattachée à la LIGNE : `candidatureId` est non
+// nullable, donc aucun mode profil ni aucun propriétaire n'écrit ici.
+// ---------------------------------------------------------------------------
+
+describe('GET /api/files/cv — audit AuditCandidature (V3-I)', () => {
+  beforeEach(() => {
+    login(3, 'recruteur')
+    candidatureFindUnique.mockResolvedValue(CANDIDATURE)
+  })
+
+  it('mode ?candidature= recruteur : `consultation` écrite après logCvAccess, avant la signature', async () => {
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(302)
+    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
+    expect(auditCandidatureCreate).toHaveBeenCalledWith({
+      data: {
+        candidatureId: 11,
+        // Acteur = userId de la session (3), JAMAIS le candidat propriétaire (5).
+        acteurId: 3,
+        action: 'consultation',
+        ancienStatut: null,
+        nouveauStatut: null,
+      },
+    })
+    // Fail-closed : accès fichier → audit → signature (aucune URL sans trace).
+    const ordreJournal = vi.mocked(logCvAccess).mock.invocationCallOrder[0] ?? 0
+    const ordreAudit = auditCandidatureCreate.mock.invocationCallOrder[0] ?? 0
+    const ordreSignature = vi.mocked(signDownloadUrl).mock.invocationCallOrder[0] ?? 0
+    expect(ordreAudit).toBeGreaterThan(ordreJournal)
+    expect(ordreSignature).toBeGreaterThan(ordreAudit)
+  })
+
+  it('mode ?candidature= admin : même écriture, acteur = userId admin', async () => {
+    login(1, 'admin')
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(302)
+    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
+    expect(auditCandidatureCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ acteurId: 1 }) }),
+    )
+  })
+
+  it("refus 403 (candidature d’autrui) : AUCUNE écriture d’audit", async () => {
+    login(9, 'recruteur')
+
+    const response = await GET(cvRequest('?candidature=11'))
+
+    expect(response.status).toBe(403)
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+  })
+
+  it("échec de l’écriture d’audit : pas d’URL signée (fail-closed)", async () => {
+    auditCandidatureCreate.mockRejectedValueOnce(new Error('audit indisponible'))
+
+    await expect(GET(cvRequest('?candidature=11'))).rejects.toThrow('audit indisponible')
+    expect(signDownloadUrl).not.toHaveBeenCalled()
+    expect(logCvAccess).toHaveBeenCalled()
   })
 })
 

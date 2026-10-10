@@ -1,5 +1,6 @@
 import { auth } from '@/auth'
 import { logCvAccess } from '@/lib/audit'
+import { ACTION_AUDIT_CONSULTATION, journaliserCandidature } from '@/lib/candidature-audit'
 import type { Role } from '@/lib/definitions'
 import { prisma } from '@/lib/prisma'
 import { downloadMeta, signDownloadUrl } from '@/lib/storage'
@@ -57,8 +58,14 @@ import { NextResponse, type NextRequest } from 'next/server'
 //
 // Journal : recruteur ou admin UNIQUEMENT, écrit AVANT toute diffusion —
 // fail-closed : sans trace, pas d'URL signée ; la cible consignée est le
-// CANDIDAT propriétaire de la ligne. Aucune écriture AuditCandidature ici
-// (le rattachement événementiel relève de V3-I).
+// CANDIDAT propriétaire de la ligne. Le mode `?candidature=` écrit DEUX
+// traces dans ce cas, dans cet ordre : le journal d’accès (AccesFichier) puis
+// la ligne `consultation` d’AuditCandidature (src/lib/candidature-audit.ts,
+// acteur = userId du recruteur/admin) — échec de l’une ou de l’autre ⇒ aucune
+// URL signée. AUCUNE écriture AuditCandidature en mode `?candidatId=` (profil
+// : pas de `candidatureId` possible, colonne non nullable) ni quand le
+// propriétaire candidat lit sa propre pièce jointe (le propriétaire n’est pas
+// un événement sensible, comme pour logCvAccess).
 //
 // La redirection ne porte aucun Cache-Control par défaut sur certains
 // intermédiaires : `private, no-store` est posé sur la réponse elle-même pour
@@ -194,6 +201,16 @@ async function serveCandidature(raw: string, userId: number, role: Role): Promis
   // La cible consignée est le CANDIDAT propriétaire de la ligne.
   if (role !== 'candidat') {
     await logCvAccess(userId, candidature.candidat.id)
+    // Ligne `consultation` (V3-I) : APRÈS le journal d’accès, AVANT la
+    // signature — un échec interdit toute URL, comme logCvAccess. Le
+    // propriétaire candidat n’écrit rien (branche exclue ci-dessus).
+    await journaliserCandidature(prisma, {
+      candidatureId,
+      acteurId: userId,
+      action: ACTION_AUDIT_CONSULTATION,
+      ancienStatut: null,
+      nouveauStatut: null,
+    })
   }
 
   // Le fichier servi est le SNAPSHOT de la ligne, pas le cvPath du profil.
