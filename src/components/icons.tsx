@@ -187,3 +187,47 @@ export function IconBuilding({ size, ...props }: IconProps) {
     </svg>
   )
 }
+
+export function IconChat({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+    </svg>
+  )
+}
+
+export function IconSend({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  )
+}
+
+export function IconArrowLeft({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M19 12H5" />
+      <path d="m12 19-7-7 7-7" />
+    </svg>
+  )
+}
+
+export function IconBan({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m4.9 4.9 14.2 14.2" />
+    </svg>
+  )
+}
+
+export function IconFlag({ size, ...props }: IconProps) {
+  return (
+    <svg {...base({ size, ...props })}>
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <path d="M4 22v-7" />
+    </svg>
+  )
+}

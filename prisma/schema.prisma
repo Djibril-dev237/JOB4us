@@ -30,6 +30,11 @@ model User {
   candidat          Candidat?
   entreprise        Entreprise?
   messages          Message[]
+  conversationsEtat ConversationEtat[]
+  blocagesEmis      Blocage[]         @relation("BlocageEmis")
+  blocagesRecus     Blocage[]         @relation("BlocageRecus")
+  signalementsEmis  Signalement[]     @relation("SignalementAuteur")
+  signalementsTraites Signalement[]   @relation("SignalementTraite")
   notifications     Notification[]
   offresSauvegardees OffreSauvegardee[]
   accounts          Account[]
@@ -65,7 +70,6 @@ model Candidat {
   user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   competences    CandidatCompetence[]
   candidatures   Candidature[]
-  conversations  Conversation[]
   experiences    Experience[]
   formations     Formation[]
 
@@ -149,7 +153,6 @@ model Entreprise {
 
   user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   offres            Offre[]
-  conversations     Conversation[]
 
   @@map("entreprises")
 }
@@ -250,7 +253,6 @@ model Offre {
   entreprise        Entreprise        @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
   categorie         Categorie         @relation(fields: [categorieId], references: [id], onDelete: Restrict)
   candidatures      Candidature[]
-  conversations     Conversation[]
   competences       OffreCompetence[]
   savedByUsers      OffreSauvegardee[]
 
@@ -326,6 +328,8 @@ model Candidature {
 
   offre            Offre             @relation(fields: [offreId], references: [id], onDelete: Cascade)
   candidat         Candidat          @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  // M8 : une conversation par candidature (clé portée par Conversation).
+  conversation     Conversation?
 
   @@unique([offreId, candidatId])
   // M7 : l'index FK simple `candidatId` devient composite (candidatId,
@@ -418,43 +422,135 @@ enum StatutCandidature {
 // MESSAGERIE & NOTIFICATIONS
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// M8 — MESSAGERIE : une conversation PAR CANDIDATURE (Étape 2 validée).
+// Les participants ne sont JAMAIS copiés : ils se dérivent de la candidature
+// (candidat postulant + propriétaire courant de l'offre) à chaque accès —
+// aucune table de participants à désynchroniser, et le contrôle
+// d'appartenance tombe dans la même requête que la lecture.
+// ---------------------------------------------------------------------------
 model Conversation {
-  id           Int         @id @default(autoincrement())
-  candidatId   Int         @map("candidat_id")
-  recruteurId  Int         @map("recruteur_id")
-  offreId      Int?        @map("offre_id")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  id            Int          @id @default(autoincrement())
+  // Une seule conversation par candidature : contrainte DB → doublon
+  // structurellement impossible, y compris en course (contrairement à
+  // l'ancien unique (candidat, recruteur, offre) poreux avec offre NULL).
+  candidatureId Int          @unique @map("candidature_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  candidat     Candidat    @relation(fields: [candidatId], references: [id], onDelete: Cascade)
-  entreprise   Entreprise  @relation(fields: [recruteurId], references: [id], onDelete: Cascade)
-  offre        Offre?      @relation(fields: [offreId], references: [id], onDelete: SetNull)
-  messages     Message[]
+  candidature   Candidature  @relation(fields: [candidatureId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  etats         ConversationEtat[]
 
-  // Note MySQL : UNIQUE avec offre_id NULL n'empeche pas les doublons
-  // (NULL != NULL). Dedoublonnage a appliquer au niveau applicatif (M8).
-  @@unique([candidatId, recruteurId, offreId])
-  @@index([candidatId], map: "conversations_candidat_id_fkey")
-  @@index([offreId], map: "conversations_offre_id_fkey")
-  @@index([recruteurId], map: "conversations_recruteur_id_fkey")
   @@map("conversations")
 }
 
+// Contenu en texte BRUT (jamais de HTML) — le serveur nettoie et
+// tronque à 2000 caractères (messagerie-contenu.ts, Étape 2 §6/§7).
+// Pas d'updatedAt : les messages sont immuables (append-only).
 model Message {
   id              Int          @id @default(autoincrement())
   conversationId  Int          @map("conversation_id")
   senderId        Int          @map("sender_id")
   contenu         String       @db.Text
-  isLu            Boolean      @default(false) @map("is_lu")
   createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
 
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  signalements    Signalement[]
 
-  @@index([conversationId], map: "messages_conversation_id_fkey")
+  // Curseur de pagination (WHERE conversation_id = ? AND created_at < ?)
+  // — colonne de tête = FK couverte, pas de filesort. Le senderId garde
+  // son index FK (compteurs de non-lus par expéditeur).
+  @@index([conversationId, createdAt], map: "messages_conv_created_idx")
   @@index([senderId], map: "messages_sender_id_fkey")
   @@map("messages")
+}
+
+// ÉTAT PAR PARTICIPANT (Étape 2 §4/§8) : masquage logique et accusé de
+// lecture — un seul UPDATE par ouverture de conversation (luLe), jamais
+// un UPDATE par message comme l'ancien is_lu global.
+model ConversationEtat {
+  conversationId Int       @map("conversation_id")
+  userId         Int       @map("user_id")
+  masqueLe       DateTime? @map("masque_le")
+  luLe           DateTime? @map("lu_le")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  // Liste « mes conversations » : exclusion des masquées de mon côté
+  // (WHERE user_id = ? AND masque_le IS NULL) sans scan de la table.
+  @@index([userId, masqueLe], map: "conv_etat_user_masque_idx")
+  @@map("conversations_etat")
+}
+
+// BLOCAGE À PORTÉE GLOBALE (Étape 2 §5) : bloquer vaut pour toutes les
+// conversations entre les deux acteurs ET pour les futures (nouvelle
+// candidature ≠ nouvelle porte de relance).
+model Blocage {
+  id         Int      @id @default(autoincrement())
+  bloqueurId Int      @map("bloqueur_id")
+  bloqueId   Int      @map("bloque_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  bloqueur   User     @relation("BlocageEmis", fields: [bloqueurId], references: [id], onDelete: Cascade)
+  bloque     User     @relation("BlocageRecus", fields: [bloqueId], references: [id], onDelete: Cascade)
+
+  @@unique([bloqueurId, bloqueId])
+  // « ai-je bloqué X » / « qui m'a bloqué » en indexé.
+  @@index([bloqueId], map: "blocages_bloque_idx")
+  @@map("blocages")
+}
+
+enum StatutSignalement {
+  ouvert
+  traite
+
+  @@map("signalements_statut")
+}
+
+// SIGNALEMENT D'UN MESSAGE (Étape 2 §5) : un participant peut signaler
+// même bloqué (le blocage ne doit pas couvrir le harcèlement).
+model Signalement {
+  id          Int               @id @default(autoincrement())
+  messageId   Int               @map("message_id")
+  auteurId    Int               @map("auteur_id")
+  motif       String            @db.VarChar(300)
+  statut      StatutSignalement @default(ouvert)
+  noteInterne String?           @map("note_interne") @db.Text
+  traiteParId Int?              @map("traite_par_id")
+  traiteLe    DateTime?         @map("traite_le")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  message     Message           @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  auteur      User              @relation("SignalementAuteur", fields: [auteurId], references: [id], onDelete: Cascade)
+  traitePar   User?             @relation("SignalementTraite", fields: [traiteParId], references: [id], onDelete: SetNull)
+
+  // Pas de doublon : un seul signalement par (message, auteur).
+  @@unique([messageId, auteurId])
+  // File de modération : WHERE statut = 'ouvert' ORDER BY created_at.
+  @@index([statut, createdAt], map: "signalements_statut_idx")
+  @@map("signalements")
+}
+
+// JOURNAL DE CONSULTATION ADMIN (Étape 2 §2) — même doctrine que
+// AuditCandidature (M7) : AUCUNE clé étrangère (la trace survit aux
+// suppressions), append-only, acteur = session.userId. Seule la
+// consultation depuis un signalement ouvert est tracée ici.
+model AuditConversation {
+  id             Int      @id @default(autoincrement())
+  conversationId Int      @map("conversation_id")
+  acteurId       Int      @map("acteur_id")
+  signalementId  Int?     @map("signalement_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([conversationId], map: "audit_conversations_conversation_id_idx")
+  @@index([acteurId], map: "audit_conversations_acteur_id_idx")
+  @@index([createdAt], map: "audit_conversations_created_at_idx")
+  @@map("audit_conversations")
 }
 
 model Notification {
