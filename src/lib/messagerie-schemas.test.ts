@@ -46,6 +46,17 @@ describe('schemaEnvoyerMessage — entiers stricts', () => {
     ).toBe(false)
   })
 
+  it('rejette conversationId au-delà de l’Int32 (un id géant ferait échouer Prisma : 500 évité)', () => {
+    // 2^31 : la borne exacte du type Int MySQL — Prisma lève hors de toute
+    // gestion au-delà, donc le schema refuse AVANT toute requête.
+    expect(
+      schemaEnvoyerMessage.safeParse({ conversationId: 2_147_483_648, contenu: 'salut' }).success,
+    ).toBe(false)
+    expect(
+      schemaEnvoyerMessage.safeParse({ conversationId: 2_147_483_647, contenu: 'salut' }).success,
+    ).toBe(true)
+  })
+
   it('rejette un contenu vide', () => {
     expect(schemaEnvoyerMessage.safeParse({ conversationId: 1, contenu: '' }).success).toBe(false)
   })
@@ -111,7 +122,7 @@ describe('schemas d’identifiants — entiers positifs', () => {
   ] as const)(
     '%s rejette « %s » en chaîne, à zéro et négatif',
     (_nom, schema, cle) => {
-      for (const valeur of ['7', 0, -12]) {
+      for (const valeur of ['7', 0, -12, 2_147_483_648]) {
         expect(schema.safeParse({ [cle]: valeur }).success).toBe(false)
       }
     },

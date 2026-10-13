@@ -103,6 +103,23 @@ export const TEXTES = {
   /** Libellés de chargement et d'activité. */
   chargement: 'Chargement…',
   nouveauxMessages: 'Nouveaux messages',
+
+  // Écrans M8 : reprises des vues legacy (messages/index + show.blade.php)
+  // et des actions de l'Étape 4 validée — le décompte du titre legacy
+  // « {n} conversation(s) » reste littéral, aucune reformulation.
+  titreMessages: 'Messages',
+  filtreToutes: 'Toutes',
+  filtreNonLues: 'Non lues',
+  compteurConversations: 'conversation(s)',
+  chargerPlus: 'Charger les messages plus anciens',
+  envoyer: 'Envoyer',
+  placeholderMessage: 'Écrivez votre message...',
+  masquer: 'Masquer',
+  bloquer: 'Bloquer',
+  signaler: 'Signaler',
+  fermer: 'Fermer',
+  confirmationMasquage: 'Masquer cette conversation ? Elle disparaîtra de votre liste.',
+  tropDeMessages: 'Trop de messages envoyés. Patientez une minute.',
 } as const
 
 // ─── Variante de badge par état de conversation ──────────────────────────────

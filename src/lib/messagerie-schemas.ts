@@ -34,11 +34,22 @@ import { GARDE_LONGUEUR_BRUT } from './messagerie-contenu'
 // reconduite ici).
 // ---------------------------------------------------------------------------
 
+/**
+ * Plafond des identifiants MySQL `Int` (signé 32 bits).
+ *
+ * AU-DELÀ, Prisma lève `PrismaClientValidationError` hors de toute gestion —
+ * un id géant (20 chiffres saisi dans l'URL) deviendrait une erreur 500 au
+ * lieu d'un verdict « forme invalide ». Bornage au bord du serveur : chaque
+ * schéma refuse, chaque parse numérique hors schéma (paramètre de route,
+ * query d'API) rejoue la même borne (critère M8 « zéro 500 »).
+ */
+export const MAX_IDENTIFIANT = 2_147_483_647
+
 // ─── 1) Envoi d'un message dans une conversation ─────────────────────────────
 
 export const schemaEnvoyerMessage = z
   .object({
-    conversationId: z.number().int().positive(),
+    conversationId: z.number().int().positive().max(MAX_IDENTIFIANT),
     contenu: z.string().min(1).max(GARDE_LONGUEUR_BRUT),
   })
   .strict()
@@ -52,7 +63,7 @@ export const schemaEnvoyerMessage = z
 
 export const schemaCurseurMessages = z
   .object({
-    conversationId: z.number().int().positive(),
+    conversationId: z.number().int().positive().max(MAX_IDENTIFIANT),
     curseur: z.string().datetime({ offset: true }).optional(),
   })
   .strict()
@@ -64,7 +75,7 @@ export const schemaCurseurMessages = z
 // l'action, pas du schema.
 
 export const schemaMasquerConversation = z
-  .object({ conversationId: z.number().int().positive() })
+  .object({ conversationId: z.number().int().positive().max(MAX_IDENTIFIANT) })
   .strict()
 
 // ─── 4) Blocage d'un utilisateur (fin de toute nouvelle conversation) ───────
@@ -74,7 +85,7 @@ export const schemaMasquerConversation = z
 // erreur » son propre identifiant en lisant le payload à l'envers.
 
 export const schemaBloquerUtilisateur = z
-  .object({ cibleUserId: z.number().int().positive() })
+  .object({ cibleUserId: z.number().int().positive().max(MAX_IDENTIFIANT) })
   .strict()
 
 // ─── 5) Signalement d'un message (motif saisi par le signalant) ─────────────
@@ -86,7 +97,7 @@ export const schemaBloquerUtilisateur = z
 
 export const schemaSignalerMessage = z
   .object({
-    messageId: z.number().int().positive(),
+    messageId: z.number().int().positive().max(MAX_IDENTIFIANT),
     motif: z.string().min(3).max(GARDE_LONGUEUR_BRUT),
   })
   .strict()
@@ -99,7 +110,7 @@ export const schemaSignalerMessage = z
 
 export const schemaTraiterSignalement = z
   .object({
-    signalementId: z.number().int().positive(),
+    signalementId: z.number().int().positive().max(MAX_IDENTIFIANT),
     noteInterne: z.string().max(2000).optional(),
   })
   .strict()

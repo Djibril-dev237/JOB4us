@@ -71,15 +71,26 @@ describe('estLectureSeule / motifLectureSeule (exhaustif sur les 7 statuts)', ()
 })
 
 describe('TEXTES (source unique, aucun texte inventé)', () => {
-  it('expose exactement les 18 clés du cahier des charges', () => {
+  it('expose exactement les 32 clés du cahier des charges', () => {
+    // 19 clés de la Vague 1 + 13 clés d'écran ajoutées à l'intégration
+    // Vague 2 (exigées par les pages SA-5 et les composants SA-6, textes
+    // repris des vues legacy messages/*.blade.php).
     expect(Object.keys(TEXTES).sort()).toEqual(
       [
         'actualisationEchouee',
+        'bloquer',
         'chargement',
+        'chargerPlus',
+        'compteurConversations',
+        'confirmationMasquage',
         'conversationVide',
         'ecritureBloquee',
         'envoiEchoue',
         'envoiRefuse',
+        'envoyer',
+        'fermer',
+        'filtreNonLues',
+        'filtreToutes',
         'interlocuteurBloque',
         'interlocuteurDebloque',
         'lectureSeuleAcceptee',
@@ -89,10 +100,15 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
         'lienOffre',
         'listeVide',
         'listeVideNonLues',
+        'masquer',
         'moderationLue',
         'nouveauxMessages',
+        'placeholderMessage',
         'signalementDejaFait',
         'signalementEnvoye',
+        'signaler',
+        'titreMessages',
+        'tropDeMessages',
       ].sort(),
     )
   })
@@ -118,6 +134,19 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
       lienCandidature: 'Voir la candidature',
       chargement: 'Chargement…',
       nouveauxMessages: 'Nouveaux messages',
+      titreMessages: 'Messages',
+      filtreToutes: 'Toutes',
+      filtreNonLues: 'Non lues',
+      compteurConversations: 'conversation(s)',
+      chargerPlus: 'Charger les messages plus anciens',
+      envoyer: 'Envoyer',
+      placeholderMessage: 'Écrivez votre message...',
+      masquer: 'Masquer',
+      bloquer: 'Bloquer',
+      signaler: 'Signaler',
+      fermer: 'Fermer',
+      confirmationMasquage: 'Masquer cette conversation ? Elle disparaîtra de votre liste.',
+      tropDeMessages: 'Trop de messages envoyés. Patientez une minute.',
     })
   })
 

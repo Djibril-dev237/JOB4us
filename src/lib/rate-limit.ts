@@ -82,6 +82,23 @@ export const CANDIDATURES_MAX_PAR_COMPTE = 10
 /** Fenêtre glissante des postulations M7. */
 export const CANDIDATURES_WINDOW_MS = 60 * 60 * 1_000
 
+// ─── Politique de messagerie (M8) ────────────────────────────────────────────
+//
+// 10 messages par minute et par compte (clé `messagerie:envoi:<userId>`) :
+// le seau est porté par l'ACTEUR, jamais par la conversation — sinon un
+// spammeur contournerait le plafond en ouvrant plusieurs onglets ou en
+// écrivant dans plusieurs conversations à la suite. Même règle de
+// consommation que M6/M7 : `recordAttempt` APRÈS une écriture réelle (un
+// envoi refusé — lecture seule, blocage, taille, conversation d'autrui —
+// ne consomme pas le budget d'une minute). Fenêtre COURTE (1 min), très
+// en deçà de MAX_WINDOW_MS : l'invariant de `sweep()` reste couvert.
+
+/** Messages max par compte et par fenêtre glissante M8. */
+export const MESSAGERIE_MAX_ENVOIS_PAR_COMPTE = 10
+
+/** Fenêtre glissante des envois de messages M8. */
+export const MESSAGERIE_ENVOI_WINDOW_MS = 60 * 1_000
+
 // ─── Opérations ──────────────────────────────────────────────────────────────
 
 export interface RateLimitResult {
