@@ -27,8 +27,9 @@ import { prisma } from '@/lib/prisma'
 // Le compromis (3 requêtes, comptage des non-lus EN MÉMOIRE) est documenté
 // sur la fonction.
 //
-// ÉCRITURES — strictement limitées à `ConversationEtat` (accusé de lecture
-// `luLe`, masquage `masqueLe`) : les messages sont append-only et la
+// ÉCRITURES — deux familles : `ConversationEtat` (accusé de lecture `luLe`,
+// masquage `masqueLe`) pour la Vague 2, puis BLOCAGE et SIGNALEMENT (Vague 3)
+// qui écrivent leur propre table. Les messages restent append-only et la
 // conversation/candidature ne sont JAMAIS mutés depuis ce module.
 //
 // Ce module alimente les pages/actions de la Vague 2 (et leur test de
@@ -80,6 +81,18 @@ export interface PageMessages {
 // ─── Briques partagées (participants + anti-fuite de titre) ─────────────────
 
 /**
+ * Appartenance d'une CANDIDATURE à un compte : candidat postulant, OU
+ * propriétaire courant de l'offre. Extrait pour être réutilisé tel quel par
+ * `ecrireSignalement` (Vague 3) — une participation qui se dérive DU AUTRE
+ * CÔTÉ d'une relation (ici : message → conversation → candidature) doit
+ * poser EXACTEMENT les mêmes clauses, sinon le signalement autoriserait ce
+ * que la lecture refuse.
+ */
+function ouCandidatOuProprietaire(userId: number): Prisma.CandidatureWhereInput {
+  return { OR: [{ candidat: { userId } }, { offre: { entreprise: { userId } } }] }
+}
+
+/**
  * `where` d'AUTHORISATION porté par la LECTURE elle-même : l'id de la
  * conversation ET l'appartenance (candidat de la candidature, OU propriétaire
  * de l'offre de la candidature) sont les clauses de la MÊME requête. Aucune
@@ -88,9 +101,7 @@ export interface PageMessages {
 function whereParticipant(conversationId: number, userId: number): Prisma.ConversationWhereInput {
   return {
     id: conversationId,
-    candidature: {
-      OR: [{ candidat: { userId } }, { offre: { entreprise: { userId } } }],
-    },
+    candidature: ouCandidatOuProprietaire(userId),
   }
 }
 
@@ -472,4 +483,103 @@ export async function poserMasque(conversationId: number, userId: number): Promi
     create: { conversationId, userId, masqueLe: maintenant },
     update: { masqueLe: maintenant },
   })
+}
+
+// ─── Blocage d'un interlocuteur (Vague 3) ────────────────────────────────────
+//
+// Le blocage est GLOBAL par acteurs (Étape 2 §5) : une ligne (bloqueurId,
+// bloqueId) vaut pour toutes les conversations passées et futures entre les
+// deux comptes — aucune conversation n'est refermée une par une, rien à
+// synchroniser. La table porte une clé unique sur la paire : la deuxième
+// écriture de la même paire est un P2002, absorbé ici pour rendre l'opération
+// idempotente (deux clics, deux onglets, retry réseau : jamais d'erreur
+// visible, jamais de doublon).
+//
+// AUCUNE vérification de participation ni de « pas soi-même » ici : la cible
+// est un `userId`, pas une conversation, et le contrôle d'appelant (session,
+// pas d'auto-blocage) appartient à l'action Vague 3 qui appelle ce module —
+// même séparation DAL/action que `poserMasque`.
+
+/**
+ * Pose le blocage `bloqueurId → bloqueId` (idempotent) : le create, puis le
+ * P2002 de la clé unique absorbé en silence (la ligne existe déjà, le voulu
+ * est atteint). Toute AUTRE erreur DB remonte telle quelle (l'appelant rend
+ * la panne générique) — aucun catch généraliste qui masquerait une vraie panne.
+ */
+export async function poserBlocage(bloqueurId: number, bloqueId: number): Promise<void> {
+  try {
+    await prisma.blocage.create({ data: { bloqueurId, bloqueId } })
+  } catch (erreur) {
+    if (erreur instanceof Prisma.PrismaClientKnownRequestError && erreur.code === 'P2002') {
+      return
+    }
+    throw erreur
+  }
+}
+
+/**
+ * Lève le blocage `bloqueurId → bloqueId` (idempotent) : `deleteMany` sans
+ * condition de présence — 0 ligne supprimée signifie « déjà débloqué », ce
+ * n'est PAS une erreur (même verdict que le déblocage réel côté appelant).
+ */
+export async function leverBlocage(bloqueurId: number, bloqueId: number): Promise<void> {
+  await prisma.blocage.deleteMany({ where: { bloqueurId, bloqueId } })
+}
+
+// ─── Signalement d'un message (Vague 3) ──────────────────────────────────────
+
+/**
+ * Signale un message au nom de `auteurId` (motif déjà nettoyé par l'action).
+ *
+ * UNE SEULE `findFirst` porte les TROIS conditions d'existence, dans le `where`
+ * de la lecture — aucun contrôle après coup (une lecture puis une seconde
+ * vérification laisserait une fenêtre de course et révélerait lesquelles ont
+ * échoué) :
+ *   1. le message existe (id dans la table) ;
+ *   2. `auteurId` PARTICIPE à la conversation du message — même dérivation
+ *      candidature que `whereParticipant` (`ouCandidatOuProprietaire`), suivie
+ *      à travers la relation message → conversation : signaler ne s'ouvre pas
+ *      à n'importe qui sur des ids énumérables ;
+ *   3. le message n'est PAS signé par `auteurId` lui-même (on ne signale pas
+ *      ses propres messages : ce serait un canal d'auto-escalade).
+ *
+ * `null` = l'un des trois échoue — JAMAIS lequel (pas d'oracle d'énumération,
+ * calque du 404 indiscernable de `chargerConversation`). Le verdict détaillé
+ * n'a d'ailleurs aucune utilité UI : l'appelant rend la panne générique.
+ *
+ * Le blocage n'apparaît PAS dans ce `where` : signaler reste la soupape de
+ * sécurité des harcèlements, POSSIBLE même bloqué (sinon le blocage couvrirait
+ * exactement les cas où la modération doit être saisie).
+ *
+ * Sans doublon grâce à la clé unique (messageId, auteurId) : le create lève
+ * P2002 si ce message a déjà été signalé par ce compte → `'existant'`, et le
+ * signalement antérieur reste la vérité (aucun update, aucun overwrite du motif).
+ */
+export async function ecrireSignalement(
+  messageId: number,
+  auteurId: number,
+  motif: string,
+): Promise<'cree' | 'existant' | null> {
+  const message = await prisma.message.findFirst({
+    where: {
+      id: messageId,
+      senderId: { not: auteurId },
+      conversation: { candidature: ouCandidatOuProprietaire(auteurId) },
+    },
+    select: { id: true },
+  })
+
+  if (message === null) {
+    return null
+  }
+
+  try {
+    await prisma.signalement.create({ data: { messageId, auteurId, motif } })
+    return 'cree'
+  } catch (erreur) {
+    if (erreur instanceof Prisma.PrismaClientKnownRequestError && erreur.code === 'P2002') {
+      return 'existant'
+    }
+    throw erreur
+  }
 }

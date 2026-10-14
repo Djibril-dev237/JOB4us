@@ -91,18 +91,24 @@ export default async function PageConversation({
   // Motif de lecture seule au STATUT (null = conversation encore ouverte).
   const motif = motifLectureSeule(conversation.statutCandidature)
 
-  // Blocage dans les DEUX sens : une seule requête, deux clauses OR.
-  const blocage = await prisma.blocage.findFirst({
+  // Blocage dans les DEUX sens : `findMany` et non `findFirst` — en cas de
+  // blocage MUTUEL les deux lignes existent, et le choix arbitraire d'un
+  // `findFirst` (aucun `orderBy`) orienterait le verdict : bouton « Bloquer »
+  // au lieu de « Débloquer », P2002 absorbé en boucle, déblocage impossible.
+  // Chaque sens est donc dérivé séparément par `some`.
+  const blocages = await prisma.blocage.findMany({
     where: {
       OR: [
         { bloqueurId: session.userId, bloqueId: conversation.autre.userId },
         { bloqueurId: conversation.autre.userId, bloqueId: session.userId },
       ],
     },
-    select: { bloqueurId: true, bloqueId: true },
+    select: { bloqueurId: true },
   })
-  const bloqueeParMoi = blocage !== null && blocage.bloqueurId === session.userId
-  const bloqueeParAutre = blocage !== null && blocage.bloqueId === session.userId
+  const bloqueeParMoi = blocages.some((blocage) => blocage.bloqueurId === session.userId)
+  const bloqueeParAutre = blocages.some(
+    (blocage) => blocage.bloqueurId === conversation.autre.userId,
+  )
 
   // Écriture possible : ni statut terminal, ni blocage — un SEUL aiguillage
   // pilote bandeau et composer (jamais deux logiques divergentes).
@@ -140,11 +146,15 @@ export default async function PageConversation({
       {/* Colonne principale : toujours min-w-0 (aucun scroll horizontal). */}
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <EnTeteConversation
+          // Vague 3 : `bloqueeParMoi` forwardé jusqu'à ActionsConversation —
+          // le bascule Bloquer/Débloquer reflète la vérité de la RSC (aucun
+          // état de blocage n'est dupliqué côté client).
           titre={conversation.autre.nom}
           statut={conversation.statutCandidature}
           conversationId={id}
           autreUserId={conversation.autre.userId}
           autreNom={conversation.autre.nom}
+          bloqueeParMoi={bloqueeParMoi}
         />
 
         {bandeau !== null ? (

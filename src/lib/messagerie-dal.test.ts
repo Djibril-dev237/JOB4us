@@ -4,7 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Prisma as NsPrisma } from '@prisma/client'
 
-import { PAGE, avancerLecture, chargerConversation, listerConversations, lireMessagesParCurseur, poserMasque } from './messagerie-dal'
+import {
+  PAGE,
+  avancerLecture,
+  chargerConversation,
+  ecrireSignalement,
+  leverBlocage,
+  listerConversations,
+  lireMessagesParCurseur,
+  poserBlocage,
+  poserMasque,
+} from './messagerie-dal'
 
 // ─── Tests de la couche de données MESSAGERIE (M8, Vague 1) ─────────────────
 // Trois critères verrouillés ici :
@@ -73,6 +83,18 @@ interface ArgsEtatUpsert {
   update?: NsPrisma.ConversationEtatUncheckedUpdateInput
 }
 
+interface ArgsBlocageCreate {
+  data: NsPrisma.BlocageUncheckedCreateInput
+}
+
+interface ArgsBlocageDeleteMany {
+  where?: NsPrisma.BlocageWhereInput
+}
+
+interface ArgsSignalementCreate {
+  data: NsPrisma.SignalementUncheckedCreateInput
+}
+
 // Lignes simulées (payload retourné par le mock, jamais `any`).
 
 interface UserSim {
@@ -120,6 +142,9 @@ const {
   etatFindUnique,
   etatCreate,
   etatUpsert,
+  blocageCreate,
+  blocageDeleteMany,
+  signalementCreate,
 } = vi.hoisted(() => ({
   conversationFindFirst: vi.fn<(args: ArgsConversationFindFirst) => Promise<unknown>>(),
   conversationFindMany: vi.fn<(args: ArgsConversationFindMany) => Promise<unknown>>(),
@@ -130,6 +155,9 @@ const {
   etatFindUnique: vi.fn<(args: ArgsEtatFindUnique) => Promise<unknown>>(),
   etatCreate: vi.fn<(args: ArgsEtatCreate) => Promise<unknown>>(),
   etatUpsert: vi.fn<(args: ArgsEtatUpsert) => Promise<unknown>>(),
+  blocageCreate: vi.fn<(args: ArgsBlocageCreate) => Promise<unknown>>(),
+  blocageDeleteMany: vi.fn<(args: ArgsBlocageDeleteMany) => Promise<{ count: number }>>(),
+  signalementCreate: vi.fn<(args: ArgsSignalementCreate) => Promise<unknown>>(),
 }))
 
 // Seules les méthodes du DAL sont exposées : une requête de plus (un findMany
@@ -146,6 +174,8 @@ vi.mock('@/lib/prisma', () => ({
       create: etatCreate,
       upsert: etatUpsert,
     },
+    blocage: { create: blocageCreate, deleteMany: blocageDeleteMany },
+    signalement: { create: signalementCreate },
   },
 }))
 
@@ -154,6 +184,7 @@ vi.mock('@/lib/prisma', () => ({
 const CONV_ID = 5
 const CANDIDAT_USER_ID = 11
 const RECRUTEUR_USER_ID = 22
+const MESSAGE_ID = 101
 
 /** Conversation « candidat postulant à une offre publiee ». */
 function convCandidat(overrides?: Partial<ConversationSim>): ConversationSim {
@@ -195,6 +226,9 @@ beforeEach(() => {
   etatFindUnique.mockReset()
   etatCreate.mockReset()
   etatUpsert.mockReset()
+  blocageCreate.mockReset()
+  blocageDeleteMany.mockReset()
+  signalementCreate.mockReset()
   conversationFindFirst.mockResolvedValue(null)
   conversationFindMany.mockResolvedValue([])
   messageFindFirst.mockResolvedValue(null)
@@ -204,6 +238,10 @@ beforeEach(() => {
   etatFindUnique.mockResolvedValue(null)
   etatCreate.mockResolvedValue(null)
   etatUpsert.mockResolvedValue(null)
+  blocageCreate.mockResolvedValue(null)
+  // deleteMany à 0 ligne = « déjà débloqué » : le DAL doit l'absorber.
+  blocageDeleteMany.mockResolvedValue({ count: 0 })
+  signalementCreate.mockResolvedValue(null)
 })
 
 // ─── chargerConversation ────────────────────────────────────────────────────
@@ -630,5 +668,158 @@ describe('poserMasque', () => {
     expect(args?.update).toEqual({ masqueLe: expect.any(Date) })
     expect(args?.create?.masqueLe).toBeInstanceOf(Date)
     expect(args?.update?.masqueLe).toBe(args?.create?.masqueLe)
+  })
+})
+
+// ─── poserBlocage / leverBlocage ─────────────────────────────────────────────
+
+describe('poserBlocage / leverBlocage (idempotence portée par la clé unique)', () => {
+  it('poserBlocage : create portant la paire (bloqueur = appelant), AUCUNE autre écriture', async () => {
+    await poserBlocage(CANDIDAT_USER_ID, RECRUTEUR_USER_ID)
+
+    expect(blocageCreate).toHaveBeenCalledTimes(1)
+    expect(blocageCreate.mock.calls[0]?.[0].data).toEqual({
+      bloqueurId: CANDIDAT_USER_ID,
+      bloqueId: RECRUTEUR_USER_ID,
+    })
+    // Aucun contrôle de participation ici : le DAL ne lit RIEN d'autre
+    // (pas de conversation, pas de message) — c'est l'appelant qui pose
+    // les gardes d'identité.
+    expect(conversationFindFirst).not.toHaveBeenCalled()
+    expect(messageFindFirst).not.toHaveBeenCalled()
+    expect(blocageDeleteMany).not.toHaveBeenCalled()
+  })
+
+  it('poserBlocage : P2002 (paire déjà bloquée) absorbé → résout sans lever l’erreur', async () => {
+    blocageCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`bloqueur_id`,`bloque_id`)',
+        { code: 'P2002', clientVersion: '6.19.3' },
+      ),
+    )
+
+    // Idempotence : le second clic ne voit JAMAIS d'erreur.
+    await expect(poserBlocage(CANDIDAT_USER_ID, RECRUTEUR_USER_ID)).resolves.toBeUndefined()
+  })
+
+  it('poserBlocage : une AUTRE erreur DB remonte (pas de catch généraliste)', async () => {
+    blocageCreate.mockRejectedValue(new Error('DB_DOWN'))
+
+    await expect(poserBlocage(CANDIDAT_USER_ID, RECRUTEUR_USER_ID)).rejects.toThrow('DB_DOWN')
+  })
+
+  it('leverBlocage : deleteMany portant la paire ; 0 ligne supprimée = déjà débloqué, pas d’erreur', async () => {
+    await leverBlocage(CANDIDAT_USER_ID, RECRUTEUR_USER_ID)
+
+    expect(blocageDeleteMany).toHaveBeenCalledTimes(1)
+    expect(blocageDeleteMany.mock.calls[0]?.[0].where).toEqual({
+      bloqueurId: CANDIDAT_USER_ID,
+      bloqueId: RECRUTEUR_USER_ID,
+    })
+    expect(blocageCreate).not.toHaveBeenCalled()
+  })
+})
+
+// ─── ecrireSignalement ───────────────────────────────────────────────────────
+
+describe('ecrireSignalement (les 3 contrôles vivent dans le `where` d’UNE requête)', () => {
+  const MOTIF = 'Propos déplacés'
+
+  /** `where` complet attendu — les 3 clauses dans LA même lecture. */
+  function whereAttendu(auteurId: number): NsPrisma.MessageWhereInput {
+    return {
+      id: MESSAGE_ID,
+      senderId: { not: auteurId },
+      conversation: { candidature: ouParticipant(auteurId) },
+    }
+  }
+
+  it('message INEXISTANT → null, aucun create, et le where porte déjà les 3 clauses', async () => {
+    messageFindFirst.mockResolvedValue(null)
+
+    expect(await ecrireSignalement(MESSAGE_ID, CANDIDAT_USER_ID, MOTIF)).toBeNull()
+
+    // UNE seule requête : existence, participation et « pas mes propres
+    // messages » sont dans le MÊME where — pas de lecture puis re-vérif.
+    expect(messageFindFirst).toHaveBeenCalledTimes(1)
+    expect(messageFindFirst.mock.calls[0]?.[0]?.where).toEqual(whereAttendu(CANDIDAT_USER_ID))
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it('NON-PARTICIPANT → null : le where suit la relation message → conversation → candidature', async () => {
+    // Le mock retourne null, exactement ce que produirait une requête pour
+    // un étranger — la CLÉ du test est que la participation est DÉJÀ dans
+    // le where envoyé à la base.
+    messageFindFirst.mockResolvedValue(null)
+
+    expect(await ecrireSignalement(MESSAGE_ID, 999, MOTIF)).toBeNull()
+
+    expect(messageFindFirst.mock.calls[0]?.[0]?.where).toEqual(whereAttendu(999))
+    expect(Object.keys(messageFindFirst.mock.calls[0]?.[0]?.where ?? {}).sort()).toEqual([
+      'conversation',
+      'id',
+      'senderId',
+    ])
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it('message PROPRE (signé par l’auteur) → null : le where porte senderId not: auteurId', async () => {
+    messageFindFirst.mockResolvedValue(null)
+
+    expect(await ecrireSignalement(MESSAGE_ID, CANDIDAT_USER_ID, MOTIF)).toBeNull()
+
+    expect(messageFindFirst.mock.calls[0]?.[0]?.where?.senderId).toEqual({ not: CANDIDAT_USER_ID })
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it('participant sur message d’AUTRUI → create { messageId, auteurId, motif } → "cree"', async () => {
+    messageFindFirst.mockResolvedValue({ id: MESSAGE_ID })
+
+    expect(await ecrireSignalement(MESSAGE_ID, CANDIDAT_USER_ID, MOTIF)).toBe('cree')
+
+    expect(messageFindFirst.mock.calls[0]?.[0]).toEqual({
+      where: whereAttendu(CANDIDAT_USER_ID),
+      select: { id: true },
+    })
+    expect(signalementCreate).toHaveBeenCalledTimes(1)
+    expect(signalementCreate.mock.calls[0]?.[0].data).toEqual({
+      messageId: MESSAGE_ID,
+      auteurId: CANDIDAT_USER_ID,
+      motif: MOTIF,
+    })
+  })
+
+  it('déjà signalé (P2002 de la clé unique) → "existant", aucun second create', async () => {
+    messageFindFirst.mockResolvedValue({ id: MESSAGE_ID })
+    signalementCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`message_id`,`auteur_id`)',
+        { code: 'P2002', clientVersion: '6.19.3' },
+      ),
+    )
+
+    expect(await ecrireSignalement(MESSAGE_ID, CANDIDAT_USER_ID, MOTIF)).toBe('existant')
+
+    expect(signalementCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('autre erreur du create → remonte (l’appelant rend la panne générique)', async () => {
+    messageFindFirst.mockResolvedValue({ id: MESSAGE_ID })
+    signalementCreate.mockRejectedValue(new Error('DB_DOWN'))
+
+    await expect(ecrireSignalement(MESSAGE_ID, CANDIDAT_USER_ID, MOTIF)).rejects.toThrow('DB_DOWN')
+  })
+
+  it('le BLOCAGE ne gate JAMAIS le signalement : aucune clause de blocage dans le where', async () => {
+    messageFindFirst.mockResolvedValue({ id: MESSAGE_ID })
+
+    await ecrireSignalement(MESSAGE_ID, CANDIDAT_USER_ID, MOTIF)
+
+    // C'est la soupape de modération : même bloqué (ou bloquant), le
+    // signalement doit passer. Ni lecture, ni clause sur `blocage`.
+    const where = messageFindFirst.mock.calls[0]?.[0]?.where ?? {}
+    expect(JSON.stringify(where)).not.toContain('locage')
+    expect(blocageCreate).not.toHaveBeenCalled()
+    expect(blocageDeleteMany).not.toHaveBeenCalled()
   })
 })

@@ -4,16 +4,25 @@ import { Prisma } from '@prisma/client'
 
 import { verifySession } from '@/lib/dal'
 import { messageEnvoye, messageLu } from '@/lib/evenements-messagerie'
-import { nettoyerMessage } from '@/lib/messagerie-contenu'
+import { nettoyerMessage, nettoyerMotif } from '@/lib/messagerie-contenu'
 import {
   avancerLecture,
   chargerConversation,
+  ecrireSignalement,
+  leverBlocage,
   lireMessagesParCurseur,
+  poserBlocage,
   poserMasque,
 } from '@/lib/messagerie-dal'
 import { estLectureSeule } from '@/lib/messagerie-labels'
 import type { MessageAffiche } from '@/lib/messagerie-client-types'
-import { MAX_IDENTIFIANT, schemaEnvoyerMessage, schemaMasquerConversation } from '@/lib/messagerie-schemas'
+import {
+  MAX_IDENTIFIANT,
+  schemaBloquerUtilisateur,
+  schemaEnvoyerMessage,
+  schemaMasquerConversation,
+  schemaSignalerMessage,
+} from '@/lib/messagerie-schemas'
 import { prisma } from '@/lib/prisma'
 import {
   MESSAGERIE_ENVOI_WINDOW_MS,
@@ -60,6 +69,23 @@ import {
 // * JAMAIS d'exception brute ne sort d'une action : `envoyerMessage` renvoie
 //   `inconnue`, `marquerConversationLue` avale tout (best-effort, cf. sa
 //   doc) — aucune Stack Trace Prisma ne peut atteindre le client.
+//
+// VAGUE 3 (modération côté candidat/recruteur) — mêmes disciplines, périmètre
+// réduit :
+//   * `signalerMessage` : session → schema → nettoyage du motif →
+//     `ecrireSignalement` (le DAL porte les 3 contrôles d'existence dans UNE
+//     requête) → verdict. AUCUN seau (l'Étape 2 ne l'impose que pour l'envoi
+//     de messages) et AUCUN hook M9 (pas d'événement de signalement au
+//     catalogue) — un signalement ne notifie personne, il alimente la file
+//     de modération. Surtout, JAMAIS testé contre le blocage : signaler est
+//     la soupape de sécurité des harcèlements, elle doit rester ouverte même
+//     quand l'interlocuteur m'a bloqué (sinon le blocage couvrirait
+//     exactement les cas où la modération doit être saisie).
+//   * `bloquerUtilisateur` / `debloquerUtilisateur` : session → schema →
+//     PAS d'auto-blocage (la cible = moi est un refus, jamais une écriture)
+//     → DAL idempotent. Le blocage est GLOBAL par acteurs : il n'a pas besoin
+//     de la participation à une conversation particulière, donc AUCUNE
+//     lecture de conversation ici (contrairement à `masquerConversation`).
 // ---------------------------------------------------------------------------
 
 /** Rôles admis en messagerie : l'admin n'a PAS accès au canal privé. */
@@ -315,4 +341,131 @@ export async function masquerConversation(conversationId: number): Promise<void>
   }
 
   await poserMasque(conversation.id, session.userId)
+}
+
+// ─── Modération côté candidat/recruteur (Vague 3) ────────────────────────────
+
+export type ResultatSignalement =
+  | { ok: true; deja: boolean }
+  | { ok: false; erreur: 'inconnue' }
+
+/**
+ * Signale un message d'une conversation à laquelle je PARTICIPE (candidat ou
+ * recruteur ; admin → panne générique).
+ *
+ * Contrôles dans l'ordre (chaque refus précoce = zéro écriture) :
+ *   1) session + rôle admis        → `inconnue`
+ *   2) forme du payload (Zod .strict()) → `inconnue`
+ *   3) nettoyage + non-vidité du motif  → `inconnue`
+ *   4) `ecrireSignalement` : existence + participation + « pas mes propres
+ *      messages » dans UNE requête du DAL → `null` = `inconnue` (jamais
+ *      LEQUEL des trois a échoué, pas d'oracle), `'existant'` → `{ ok, deja:
+ *      true }`, `'cree'` → `{ ok, deja: false }`
+ *
+ * AUCUN seau : l'Étape 2 n'impose de budget minuté que pour l'envoi de
+ * messages ; décourager un signalement légitime par « trop de
+ * signalements » protégerait le harceleur, pas la victime. AUCUN hook M9 :
+ * aucun événement de signalement n'existe au catalogue (evenements-messagerie).
+ *
+ * Le blocage n'est JAMAIS interrogé ici (cf. l'en-tête du fichier).
+ */
+export async function signalerMessage(payload: {
+  messageId: number
+  motif: string
+}): Promise<ResultatSignalement> {
+  // 1) Session + rôle admis : un admin reçoit la panne générique.
+  const session = await sessionMessagerie()
+  if (session === null) {
+    return { ok: false, erreur: 'inconnue' }
+  }
+
+  // 2) Forme du payload : `.strict()` refuse une clé forgée (`auteurId`,
+  //    `statut`…) — l'identité du signalant sort TOUJOURS de la session.
+  const parse = schemaSignalerMessage.safeParse(payload)
+  if (!parse.success) {
+    return { ok: false, erreur: 'inconnue' }
+  }
+
+  // 3) Nettoyage : un motif réduit à du blanc après retrait des balises
+  //    n'est pas un motif — refus AVANT toute lecture ni écriture.
+  const motifPropre = nettoyerMotif(parse.data.motif)
+  if (motifPropre === '') {
+    return { ok: false, erreur: 'inconnue' }
+  }
+
+  try {
+    // 4) Les 3 contrôles d'existence vivent dans le `where` du DAL. Le P2002
+    //    de la clé unique y est déjà absorbé en `'existant'`.
+    const verdict = await ecrireSignalement(parse.data.messageId, session.userId, motifPropre)
+    if (verdict === null) {
+      return { ok: false, erreur: 'inconnue' }
+    }
+    return { ok: true, deja: verdict === 'existant' }
+  } catch (erreur) {
+    // Erreur DB inattendue : le code Prisma est utile au diagnostic, le
+    // MOTIF et l'identité ne le sont JAMAIS — on ne journalise que l'id du
+    // message (pointeur) et le code.
+    const code = erreur instanceof Prisma.PrismaClientKnownRequestError ? erreur.code : 'INCONNU'
+    console.error('[messagerie] signalement', { messageId: parse.data.messageId, code })
+    return { ok: false, erreur: 'inconnue' }
+  }
+}
+
+export type ResultatBlocage = { ok: true } | { ok: false; erreur: 'inconnue' }
+
+/**
+ * Blocage / déblocage d'un interlocuteur, contrôles communs dans l'ordre :
+ *   1) session + rôle admis   → `inconnue`
+ *   2) forme de la cible (Zod) → `inconnue`
+ *   3) PAS d'auto-blocage : la cible = moi est un refus, jamais une
+ *      écriture (un compte ne peut pas se couper du monde en un clic —
+ *      et se débloquer soi-même dissimulerait une erreur de jugement).
+ *   4) DAL idempotent (`P2002` absorbé côté `poserBlocage`, `deleteMany` à
+ *      0 ligne côté `leverBlocage`) → le verdict est le MÊME à chaque
+ *      appel : un double clic, un retry réseau ou un blocage déjà posé ne
+ *      montrent jamais d'erreur.
+ *
+ * AUCUNE lecture de participation : le blocage vaut pour toutes les
+ * conversations passées ET futures entre les deux acteurs (portée globale,
+ * Étape 2 §5) — il ne « dépend » d'aucune conversation en particulier.
+ */
+async function executerBlocage(
+  cibleUserId: number,
+  libelle: 'blocage' | 'deblocage',
+  ecrire: (bloqueurId: number, bloqueId: number) => Promise<void>,
+): Promise<ResultatBlocage> {
+  const session = await sessionMessagerie()
+  if (session === null) {
+    return { ok: false, erreur: 'inconnue' }
+  }
+
+  const parse = schemaBloquerUtilisateur.safeParse({ cibleUserId })
+  if (!parse.success) {
+    return { ok: false, erreur: 'inconnue' }
+  }
+
+  if (parse.data.cibleUserId === session.userId) {
+    return { ok: false, erreur: 'inconnue' }
+  }
+
+  try {
+    await ecrire(session.userId, parse.data.cibleUserId)
+    return { ok: true }
+  } catch (erreur) {
+    // Même discipline de log que `envoyerMessage` : code Prisma + id cible
+    // (pointeur), jamais le nom ni l'email de l'interlocuteur.
+    const code = erreur instanceof Prisma.PrismaClientKnownRequestError ? erreur.code : 'INCONNU'
+    console.error(`[messagerie] ${libelle}`, { cibleUserId: parse.data.cibleUserId, code })
+    return { ok: false, erreur: 'inconnue' }
+  }
+}
+
+/** Bloque un interlocuteur pour toutes les conversations (idempotent). */
+export async function bloquerUtilisateur(cibleUserId: number): Promise<ResultatBlocage> {
+  return executerBlocage(cibleUserId, 'blocage', poserBlocage)
+}
+
+/** Lève le blocage d'un interlocuteur (idempotent). */
+export async function debloquerUtilisateur(cibleUserId: number): Promise<ResultatBlocage> {
+  return executerBlocage(cibleUserId, 'deblocage', leverBlocage)
 }

@@ -35,6 +35,13 @@ export interface PaginationProps {
   chemin: string
   /** Paramètres de filtre à CONSERVER dans chaque lien (undefined = omis). */
   parametres?: Record<string, string | undefined>
+  /**
+   * Nom accessible de la barre (nav). Défaut = libellé de l'écran M5/M7
+   * d'origine ; un écran qui RÉUTILISE la barre (modération M8) passe son
+   * propre libellé — un lecteur d'écran ne doit jamais entendre « candidatures »
+   * au-dessus d'une file de signalements.
+   */
+  ariaLabel?: string
 }
 
 /** Lien de page (motif M5) : mêmes bornes, même rayon, motion token M2. */
@@ -91,14 +98,20 @@ function pagesAffichees(page: number, totalPages: number): Array<number | '…'>
   return suite
 }
 
-export function Pagination({ page, pages, chemin, parametres }: PaginationProps) {
+export function Pagination({
+  page,
+  pages,
+  chemin,
+  parametres,
+  ariaLabel = 'Pagination des candidatures',
+}: PaginationProps) {
   // Une seule page : pas de barre du tout (ni Précédent/Suivant inutiles,
   // ni numéro unique qui ne serait pas un lien).
   if (pages <= 1) return null
 
   return (
     <nav
-      aria-label="Pagination des candidatures"
+      aria-label={ariaLabel}
       className="mt-4 flex flex-wrap items-center justify-center gap-1.5"
     >
       {page > 1 ? (

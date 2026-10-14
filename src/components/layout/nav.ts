@@ -136,7 +136,13 @@ export const SIDEBAR_NAV: Record<Role, SidebarSection[]> = {
     },
     {
       title: 'Communication',
-      items: [{ label: 'Notifications', href: '/notifications' }],
+      items: [
+        // Modération M8 : file des signalements ouverts — l'admin n'accède
+        // aux conversations QUE depuis un signalement (Étape 2 : aucune
+        // navigation libre de boîtes, toute consultation journalisée).
+        { label: 'Signalements', href: '/admin/signalements' },
+        { label: 'Notifications', href: '/notifications' },
+      ],
     },
     {
       title: 'Compte',

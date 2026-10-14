@@ -1,4 +1,4 @@
-import type { StatutCandidature } from '@prisma/client'
+import type { StatutCandidature, StatutSignalement } from '@prisma/client'
 
 import type { BadgeVariant } from '@/components/ui/badge'
 
@@ -116,10 +116,36 @@ export const TEXTES = {
   placeholderMessage: 'Écrivez votre message...',
   masquer: 'Masquer',
   bloquer: 'Bloquer',
+  debloquer: 'Débloquer',
   signaler: 'Signaler',
   fermer: 'Fermer',
   confirmationMasquage: 'Masquer cette conversation ? Elle disparaîtra de votre liste.',
   tropDeMessages: 'Trop de messages envoyés. Patientez une minute.',
+
+  // Modération Vague 3 (Étape 2 validée : blocage global par acteurs,
+  // signalement de message, file de modération admin). Les confirmations
+  // rappellent la PORTÉE du blocage (toutes conversations) — une simple
+  // « êtes-vous sûr ? » laisserait croire à un blocage par conversation.
+  confirmationBlocage: 'Bloquer cet interlocuteur ? Il ne pourra plus vous écrire, dans aucune conversation.',
+  confirmationDeblocage: 'Débloquer cet interlocuteur ? Il pourra de nouveau vous écrire.',
+  signalementEchoue: 'Signalement non transmis. Réessayez.',
+  actionEchouee: 'Action impossible. Réessayez.',
+
+  // Écrans admin de modération (/admin/signalements) : pas d'ancêtre
+  // legacy (les vues PHP n'avaient aucune modération) — libellés courts,
+  // sans marketing, calés sur le vocabulaire du schema (ouvert/traité).
+  titreSignalements: 'Signalements',
+  filtreOuverts: 'Ouverts',
+  filtreTraites: 'Traités',
+  listeSignalementsVide: 'Aucun signalement.',
+  cloturer: 'Clôturer',
+  signalementCloture: 'Signalement clôturé.',
+  signalementDejaCloture: 'Ce signalement est déjà clôturé.',
+  noteInterne: 'Note interne',
+  motifSignalement: 'Motif',
+  pagination: 'Pagination',
+  statutOuvert: 'Ouvert',
+  statutTraite: 'Traité',
 } as const
 
 // ─── Variante de badge par état de conversation ──────────────────────────────
@@ -155,4 +181,15 @@ export function texteMotifLectureSeule(
   if (motif === 'refusee') return TEXTES.lectureSeuleRefusee
   if (motif === 'retiree') return TEXTES.lectureSeuleRetiree
   return TEXTES.ecritureBloquee
+}
+
+// ─── Libellé de statut de signalement (écran admin, Vague 3) ─────────────────
+//
+// Même doctrine que `varianteStatutConversation` : l'enum Prisma est la
+// source, la table TEXTES porte le texte — un statut futur ferait échouer
+// ce mapping tant qu'aucune formulation n'existe (aucun libellé inventé).
+
+export function libelleStatutSignalement(statut: StatutSignalement): string {
+  if (statut === 'traite') return TEXTES.statutTraite
+  return TEXTES.statutOuvert
 }

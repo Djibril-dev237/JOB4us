@@ -102,6 +102,19 @@ export function FilMessages({
   const [enChargement, setEnChargement] = useState(false)
   const [nouveaux, setNouveaux] = useState(0)
   const [messageASignaler, setMessageASignaler] = useState<MessageAffiche | null>(null)
+  // Dernier bouton « Signaler » cliqué : la fermeture de la modale lui
+  // restitue le focus (contrat documenté de `onFermer` — après le verdict,
+  // le focus ne doit pas retomber sur <body>). Un SEUL pointeur suffit :
+  // une seule modale à la fois.
+  const boutonSignalerRef = useRef<HTMLButtonElement | null>(null)
+  // Fermeture STABILISÉE : `ModaleSignalement` écoute `onFermer` dans son
+  // effet de piège — une lambda recréée à chaque rendu du fil (polling 5 s)
+  // re-déclencherait l'effet et volerait le focus sur le textarea en plein
+  // milieu d'une lecture. Deps [] : seuls un setState stable et une ref.
+  const fermerSignalement = useCallback(() => {
+    setMessageASignaler(null)
+    boutonSignalerRef.current?.focus()
+  }, [])
 
   const conteneurRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef(messages)
@@ -343,13 +356,22 @@ export function FilMessages({
                       >
                         {FORMATEUR_HEURE.format(new Date(message.createdAt))}
                       </time>
-                      <button
-                        type="button"
-                        onClick={() => setMessageASignaler(message)}
-                        className="rounded-sm px-1 text-xs text-ink-muted underline-offset-2 transition-colors duration-fast hover:text-danger hover:underline"
-                      >
-                        {TEXTES.signaler}
-                      </button>
+                      {/* On ne signale pas ses propres messages : le serveur
+                          refuse déjà (`ecrireSignalement` exclut le message
+                          propre) — le bouton ici ne promettrait qu'un échec
+                          certain. */}
+                      {mien ? null : (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            boutonSignalerRef.current = event.currentTarget
+                            setMessageASignaler(message)
+                          }}
+                          className="rounded-sm px-1 text-xs text-ink-muted underline-offset-2 transition-colors duration-fast hover:text-danger hover:underline"
+                        >
+                          {TEXTES.signaler}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </li>
@@ -370,10 +392,7 @@ export function FilMessages({
       </div>
 
       {messageASignaler !== null ? (
-        <ModaleSignalement
-          message={messageASignaler}
-          onFermer={() => setMessageASignaler(null)}
-        />
+        <ModaleSignalement message={messageASignaler} onFermer={fermerSignalement} />
       ) : null}
     </div>
   )

@@ -15,8 +15,10 @@ import { TEXTES, varianteStatutConversation } from '@/lib/messagerie-labels'
 // libellé M7) et les actions d'interlocuteur — composant CLIENT de SA-6 rendu
 // ICI côté serveur (frontière RSC → client, aucun état dans ce fichier).
 //
-// Interface FIGÉe SA-5/SA-6 : titre, statut, conversationId, autreUserId,
-// autreNom. Aucun texte local : libellés = LIBELLES_STATUT + TEXTES.
+// Interface FIGÉe SA-5/SA-6 (Vague 3 : + `bloqueeParMoi`, FORWARDÉ tel quel
+// à ActionsConversation — le bascule Bloquer/Débloquer est une vérité de la
+// RSC, jamais un état local). Aucun texte local : libellés = LIBELLES_STATUT
+// + TEXTES.
 // ---------------------------------------------------------------------------
 
 interface Props {
@@ -25,6 +27,8 @@ interface Props {
   conversationId: number
   autreUserId: number
   autreNom: string
+  /** Vrai si MOI j'ai bloqué l'interlocuteur (bouton « Débloquer »). */
+  bloqueeParMoi: boolean
 }
 
 export function EnTeteConversation({
@@ -33,6 +37,7 @@ export function EnTeteConversation({
   conversationId,
   autreUserId,
   autreNom,
+  bloqueeParMoi,
 }: Props) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
@@ -57,6 +62,7 @@ export function EnTeteConversation({
         conversationId={conversationId}
         autreUserId={autreUserId}
         autreNom={autreNom}
+        bloqueeParMoi={bloqueeParMoi}
       />
     </header>
   )

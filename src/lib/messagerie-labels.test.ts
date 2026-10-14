@@ -5,6 +5,7 @@ import {
   STATUTS_TERMINAIRES,
   TEXTES,
   estLectureSeule,
+  libelleStatutSignalement,
   motifLectureSeule,
   texteMotifLectureSeule,
   varianteStatutConversation,
@@ -71,26 +72,34 @@ describe('estLectureSeule / motifLectureSeule (exhaustif sur les 7 statuts)', ()
 })
 
 describe('TEXTES (source unique, aucun texte inventé)', () => {
-  it('expose exactement les 32 clés du cahier des charges', () => {
-    // 19 clés de la Vague 1 + 13 clés d'écran ajoutées à l'intégration
-    // Vague 2 (exigées par les pages SA-5 et les composants SA-6, textes
-    // repris des vues legacy messages/*.blade.php).
+  it('expose exactement les 49 clés du cahier des charges', () => {
+    // 19 clés Vague 1 + 13 clés d'écran Vague 2 + 17 clés de modération
+    // Vague 3 (confirmations de blocage, écran admin /admin/signalements —
+    // textes : vues legacy pour le côté candidat/recruteur, vocabulaire du
+    // schema pour le côté admin qui n'a pas d'ancêtre legacy).
     expect(Object.keys(TEXTES).sort()).toEqual(
       [
         'actualisationEchouee',
+        'actionEchouee',
         'bloquer',
         'chargement',
         'chargerPlus',
+        'cloturer',
         'compteurConversations',
+        'confirmationBlocage',
+        'confirmationDeblocage',
         'confirmationMasquage',
         'conversationVide',
+        'debloquer',
         'ecritureBloquee',
         'envoiEchoue',
         'envoiRefuse',
         'envoyer',
         'fermer',
         'filtreNonLues',
+        'filtreOuverts',
         'filtreToutes',
+        'filtreTraites',
         'interlocuteurBloque',
         'interlocuteurDebloque',
         'lectureSeuleAcceptee',
@@ -98,16 +107,26 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
         'lectureSeuleRetiree',
         'lienCandidature',
         'lienOffre',
+        'listeSignalementsVide',
         'listeVide',
         'listeVideNonLues',
         'masquer',
         'moderationLue',
+        'motifSignalement',
+        'noteInterne',
         'nouveauxMessages',
+        'pagination',
         'placeholderMessage',
+        'signalementCloture',
+        'signalementDejaCloture',
         'signalementDejaFait',
+        'signalementEchoue',
         'signalementEnvoye',
         'signaler',
+        'statutOuvert',
+        'statutTraite',
         'titreMessages',
+        'titreSignalements',
         'tropDeMessages',
       ].sort(),
     )
@@ -122,6 +141,7 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
       listeVide: 'Vos échanges apparaîtront ici après une candidature.',
       listeVideNonLues: 'Aucune conversation non lue.',
       conversationVide: 'Aucun message pour l’instant.',
+      debloquer: 'Débloquer',
       envoiEchoue: 'Message non envoyé. Réessayez.',
       envoiRefuse: 'Envoi refusé.',
       actualisationEchouee: 'Actualisation impossible.',
@@ -134,6 +154,7 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
       lienCandidature: 'Voir la candidature',
       chargement: 'Chargement…',
       nouveauxMessages: 'Nouveaux messages',
+      pagination: 'Pagination',
       titreMessages: 'Messages',
       filtreToutes: 'Toutes',
       filtreNonLues: 'Non lues',
@@ -147,6 +168,21 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
       fermer: 'Fermer',
       confirmationMasquage: 'Masquer cette conversation ? Elle disparaîtra de votre liste.',
       tropDeMessages: 'Trop de messages envoyés. Patientez une minute.',
+      confirmationBlocage: 'Bloquer cet interlocuteur ? Il ne pourra plus vous écrire, dans aucune conversation.',
+      confirmationDeblocage: 'Débloquer cet interlocuteur ? Il pourra de nouveau vous écrire.',
+      signalementEchoue: 'Signalement non transmis. Réessayez.',
+      actionEchouee: 'Action impossible. Réessayez.',
+      titreSignalements: 'Signalements',
+      filtreOuverts: 'Ouverts',
+      filtreTraites: 'Traités',
+      listeSignalementsVide: 'Aucun signalement.',
+      cloturer: 'Clôturer',
+      signalementCloture: 'Signalement clôturé.',
+      signalementDejaCloture: 'Ce signalement est déjà clôturé.',
+      noteInterne: 'Note interne',
+      motifSignalement: 'Motif',
+      statutOuvert: 'Ouvert',
+      statutTraite: 'Traité',
     })
   })
 
@@ -154,6 +190,17 @@ describe('TEXTES (source unique, aucun texte inventé)', () => {
     for (const texte of Object.values(TEXTES)) {
       expect(texte.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('libelleStatutSignalement (Vague 3, écran admin)', () => {
+  it("traduit l'enum Prisma sans jamais restituer le nom brut du statut", () => {
+    expect(libelleStatutSignalement('ouvert')).toBe(TEXTES.statutOuvert)
+    expect(libelleStatutSignalement('ouvert')).toBe('Ouvert')
+    expect(libelleStatutSignalement('traite')).toBe(TEXTES.statutTraite)
+    expect(libelleStatutSignalement('traite')).toBe('Traité')
+    // Le nom brut de l'enum ne doit jamais atteindre l'écran.
+    expect(libelleStatutSignalement('traite')).not.toBe('traite')
   })
 })
 

@@ -13,9 +13,17 @@ import {
   resetAttempts,
 } from '@/lib/rate-limit'
 
-import { chargerMessagesAnciens, envoyerMessage, marquerConversationLue, masquerConversation } from './messagerie'
+import {
+  bloquerUtilisateur,
+  chargerMessagesAnciens,
+  debloquerUtilisateur,
+  envoyerMessage,
+  marquerConversationLue,
+  masquerConversation,
+  signalerMessage,
+} from './messagerie'
 
-// ─── Tests des actions serveur MESSAGERIE (M8, Vague 2) ──────────────────────
+// ─── Tests des actions serveur MESSAGERIE (M8, Vague 2 → Vague 3) ────────────
 // Trois critères verrouillés ici :
 // 1. ORDRE DE CONTRÔLE : chaque refus précoce (rôle, forme, nettoyage,
 //    participation, lecture seule, blocage) n'a AUCUN effet de bord — zéro
@@ -27,13 +35,20 @@ import { chargerMessagesAnciens, envoyerMessage, marquerConversationLue, masquer
 // 3. AUCUNE DONNÉE PERSONNELLE en log : le catch ne journalise que l'id de
 //    conversation et le code Prisma — jamais le contenu, jamais l'identité.
 //
+// VAGUE 3 (mêmes critères, appliqués à la modération) : le signalement ne
+// consomme AUCUN seau et n'émet AUCUN hook M9 ; le blocage refuse
+// l'auto-blocage sans écrire ; les trois refus d'`ecrireSignalement`
+// (étranger / propre / non-participant) partagent le MÊME corps `inconnue`
+// — aucun verdict différencié, aucun oracle.
+//
 // Patron repris de candidatures.securite.test.ts : prisma/dal mockés, hooks
 // d'événements spyés (no-op réel), Zod et nettoyage tournant POUR DE VRAI.
 // DIFFÉRENCE assumée : le SEAU EST RÉEL (en mémoire) — seuls
 // `checkRateLimit`/`recordAttempt` sont spyés « call-through », pour prouver
 // à la fois le comportement (10 envois puis refus) et l'absence de
 // consommation sur un refus. Le DAL messagerie tourne aussi pour de vrai au
-// dessus du prisma simulé (chargerConversation, avancerLecture, poserMasque).
+// dessus du prisma simulé (chargerConversation, avancerLecture, poserMasque,
+// poserBlocage, leverBlocage, ecrireSignalement).
 // ---------------------------------------------------------------------------
 
 // ─── Types des doubles (aucun `any` : lecture des arguments réels) ───────────
@@ -76,6 +91,18 @@ interface ArgsEtatUpsert {
   where?: { conversationId_userId: { conversationId: number; userId: number } }
   create?: NsPrisma.ConversationEtatUncheckedCreateInput
   update?: NsPrisma.ConversationEtatUncheckedUpdateInput
+}
+
+interface ArgsBlocageCreate {
+  data: NsPrisma.BlocageUncheckedCreateInput
+}
+
+interface ArgsBlocageDeleteMany {
+  where?: NsPrisma.BlocageWhereInput
+}
+
+interface ArgsSignalementCreate {
+  data: NsPrisma.SignalementUncheckedCreateInput
 }
 
 // Lignes simulées (payload retourné par le mock, jamais `any`).
@@ -131,6 +158,9 @@ const {
   etatCreate,
   etatUpsert,
   blocageFindFirst,
+  blocageCreate,
+  blocageDeleteMany,
+  signalementCreate,
 } = vi.hoisted(() => ({
   conversationFindFirst: vi.fn<(args: ArgsConversationFindFirst) => Promise<unknown>>(),
   messageCreate: vi.fn<(args: ArgsMessageCreate) => Promise<MessageSim>>(),
@@ -140,6 +170,9 @@ const {
   etatCreate: vi.fn<(args: ArgsEtatCreate) => Promise<unknown>>(),
   etatUpsert: vi.fn<(args: ArgsEtatUpsert) => Promise<unknown>>(),
   blocageFindFirst: vi.fn<(args: ArgsBlocageFindFirst) => Promise<unknown>>(),
+  blocageCreate: vi.fn<(args: ArgsBlocageCreate) => Promise<unknown>>(),
+  blocageDeleteMany: vi.fn<(args: ArgsBlocageDeleteMany) => Promise<{ count: number }>>(),
+  signalementCreate: vi.fn<(args: ArgsSignalementCreate) => Promise<unknown>>(),
 }))
 
 // Seules les méthodes utilisées par les actions + le DAL sont exposées : une
@@ -154,7 +187,8 @@ vi.mock('@/lib/prisma', () => ({
       create: etatCreate,
       upsert: etatUpsert,
     },
-    blocage: { findFirst: blocageFindFirst },
+    blocage: { findFirst: blocageFindFirst, create: blocageCreate, deleteMany: blocageDeleteMany },
+    signalement: { create: signalementCreate },
   },
 }))
 
@@ -240,6 +274,9 @@ beforeEach(() => {
 
   vi.mocked(verifySession).mockResolvedValue({ userId: USER_ID, role: 'candidat' })
   blocageFindFirst.mockImplementation(async () => null)
+  blocageCreate.mockImplementation(async () => ({ id: 1 }))
+  blocageDeleteMany.mockImplementation(async () => ({ count: 1 }))
+  signalementCreate.mockImplementation(async () => ({ id: 1 }))
   messageFindFirst.mockImplementation(async () => ({ createdAt: MESSAGE_DATE }))
   etatUpdateMany.mockImplementation(async () => ({ count: 1 }))
   etatFindUnique.mockImplementation(async () => null)
@@ -599,5 +636,301 @@ describe('masquerConversation', () => {
     await masquerConversation(-1)
 
     expect(etatUpsert).not.toHaveBeenCalled()
+  })
+})
+
+// ─── signalerMessage — Vague 3 ───────────────────────────────────────────────
+
+describe('signalerMessage — signalement valide', () => {
+  it('create avec motif NETTOYÉ et auteurId = la session → { ok: true, deja: false }', async () => {
+    // Le message existe et n'est pas le mien : la double lecture du DAL est
+    // satisfaite (participation via chargerConversation n'est PAS requise ici,
+    // c'est `ecrireSignalement` qui la porte dans SON where).
+    messageFindFirst.mockImplementation(async () => ({ id: MESSAGE_ID }))
+
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: '<b>Spam</b> répété' })
+
+    // Le motif balisé est nettoyé PAR LE VRAI pipeline contenu.
+    expect(signalementCreate).toHaveBeenCalledTimes(1)
+    expect(signalementCreate.mock.calls[0]?.[0].data).toEqual({
+      messageId: MESSAGE_ID,
+      auteurId: USER_ID,
+      motif: 'Spam répété',
+    })
+    // L'identité du signalant sort de la SESSION, jamais du payload.
+    expect(resultat).toEqual({ ok: true, deja: false })
+
+    // Le `where` de l'unique lecture porte participation + « pas mes
+    // propres messages » (contrôles portés par la base, pas re-vérifiés).
+    expect(messageFindFirst.mock.calls[0]?.[0]?.where).toEqual({
+      id: MESSAGE_ID,
+      senderId: { not: USER_ID },
+      conversation: {
+        candidature: { OR: [{ candidat: { userId: USER_ID } }, { offre: { entreprise: { userId: USER_ID } } }] },
+      },
+    })
+  })
+
+  it('déjà signalé (P2002 absorbé par le DAL) → { ok: true, deja: true }, AUCUN create supplémentaire', async () => {
+    messageFindFirst.mockImplementation(async () => ({ id: MESSAGE_ID }))
+    signalementCreate.mockImplementation(async () => {
+      throw new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`message_id`,`auteur_id`)',
+        { code: 'P2002', clientVersion: '6.19.3' },
+      )
+    })
+
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: 'Motif déjà utilisé' })
+
+    expect(resultat).toEqual({ ok: true, deja: true })
+    // Un seul create : le doublon est absorbé, jamais réécrit.
+    expect(signalementCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('le signalement reste possible MÊME bloqué : AUCUNE lecture ni écriture de blocage', async () => {
+    // Soupape de modération : si le blocage couvrait le signalement, un
+    // harceleur pourrait s'auto-protéger en bloquant sa victime.
+    messageFindFirst.mockImplementation(async () => ({ id: MESSAGE_ID }))
+    blocageFindFirst.mockImplementation(async () => ({ id: 77 }))
+
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: 'Harcèlement persistant' })
+
+    expect(resultat).toEqual({ ok: true, deja: false })
+    expect(blocageFindFirst).not.toHaveBeenCalled()
+    expect(blocageCreate).not.toHaveBeenCalled()
+  })
+
+  it('ni seau ni hook M9 : checkRateLimit/recordAttempt/messageEnvoye/messageLu JAMAIS appelés', async () => {
+    messageFindFirst.mockImplementation(async () => ({ id: MESSAGE_ID }))
+
+    await signalerMessage({ messageId: MESSAGE_ID, motif: 'Motif légitime' })
+
+    expect(checkRateLimit).not.toHaveBeenCalled()
+    expect(recordAttempt).not.toHaveBeenCalled()
+    expect(messageEnvoye).not.toHaveBeenCalled()
+    expect(messageLu).not.toHaveBeenCalled()
+  })
+})
+
+describe('signalerMessage — refus sans effet de bord', () => {
+  it("ecrireSignalement → null : 'inconnue' indiscernable, zéro create", async () => {
+    // Un SEUL refus est observable côté action : la panne générique. Les
+    // trois causes réelles (message étranger, message propre,
+    // non-participation) ne sont distinguables QUE par le `where` du DAL,
+    // clauses épinglées au mot dans messagerie-dal.test.ts — ici on
+    // verrouille le contrat : quel que soit le motif du null, même corps,
+    // aucune écriture, aucun oracle.
+    messageFindFirst.mockImplementation(async () => null)
+
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: 'Motif valable' })
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(signalementCreate).not.toHaveBeenCalled()
+    // Le refus vient du `where` (une lecture a bien eu lieu), pas d'un
+    // court-circuit de l'action.
+    expect(messageFindFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it("rôle admin : 'inconnue', AUCUNE lecture (panne générique)", async () => {
+    vi.mocked(verifySession).mockResolvedValue({ userId: USER_ID, role: 'admin' })
+
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: 'Motif valable' })
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(messageFindFirst).not.toHaveBeenCalled()
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it("motif de 2 caractères (hors schema) : 'inconnue', zéro lecture", async () => {
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: 'ab' })
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(messageFindFirst).not.toHaveBeenCalled()
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it("payload `messageId: 'x'` (forme hors schema) : 'inconnue', zéro lecture", async () => {
+    const resultat = await signalerMessage({
+      messageId: 'x',
+      motif: 'Motif valable',
+    } as unknown as { messageId: number; motif: string })
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(messageFindFirst).not.toHaveBeenCalled()
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it("motif réduit à du blanc après nettoyage : 'inconnue', zéro lecture, zéro écriture", async () => {
+    // Le schema accepte le brut (6 caractères de balises), le NETTOYAGE
+    // refuse ensuite — même ordre que `envoyerMessage`.
+    const resultat = await signalerMessage({ messageId: MESSAGE_ID, motif: '<b></b>' })
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(messageFindFirst).not.toHaveBeenCalled()
+    expect(signalementCreate).not.toHaveBeenCalled()
+  })
+
+  it("create qui lève : 'inconnue', zéro seau, zéro hook, log SANS donnée personnelle", async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    messageFindFirst.mockImplementation(async () => ({ id: MESSAGE_ID }))
+    signalementCreate.mockImplementation(async () => {
+      throw new Error('DB_DOWN')
+    })
+
+    const resultat = await signalerMessage({
+      messageId: MESSAGE_ID,
+      motif: 'Secret 06 12 34 56 78',
+    })
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(recordAttempt).not.toHaveBeenCalled()
+    expect(messageEnvoye).not.toHaveBeenCalled()
+
+    // Un SEUL log : id du message (pointeur) + code — JAMAIS le motif,
+    // jamais le userId du signalant.
+    expect(consoleError).toHaveBeenCalledTimes(1)
+    const [marque, donnees] = consoleError.mock.calls[0] ?? []
+    expect(marque).toBe('[messagerie] signalement')
+    expect(donnees).toEqual({ messageId: MESSAGE_ID, code: 'INCONNU' })
+    expect(Object.keys(donnees ?? {}).sort()).toEqual(['code', 'messageId'])
+    expect(JSON.stringify(donnees)).not.toContain('Secret')
+    expect(JSON.stringify(donnees)).not.toContain(String(USER_ID))
+
+    consoleError.mockRestore()
+  })
+})
+
+// ─── bloquerUtilisateur / debloquerUtilisateur — Vague 3 ─────────────────────
+
+describe('bloquerUtilisateur', () => {
+  it('create appelé avec la BONNE PAIRE (bloqueur = session, bloque = cible) → { ok: true }', async () => {
+    const resultat = await bloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(resultat).toEqual({ ok: true })
+    expect(blocageCreate).toHaveBeenCalledTimes(1)
+    expect(blocageCreate.mock.calls[0]?.[0].data).toEqual({
+      bloqueurId: USER_ID,
+      bloqueId: AUTRE_USER_ID,
+    })
+    // Portée globale : AUCUNE lecture de conversation nécessaire.
+    expect(conversationFindFirst).not.toHaveBeenCalled()
+  })
+
+  it('paire déjà bloquée (P2002 absorbé par le DAL) → { ok: true } : jamais d’erreur au double clic', async () => {
+    blocageCreate.mockImplementation(async () => {
+      throw new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`bloqueur_id`,`bloque_id`)',
+        { code: 'P2002', clientVersion: '6.19.3' },
+      )
+    })
+
+    await expect(bloquerUtilisateur(AUTRE_USER_ID)).resolves.toEqual({ ok: true })
+  })
+
+  it("auto-blocage (cible = moi) : 'inconnue', ZÉRO écriture", async () => {
+    const resultat = await bloquerUtilisateur(USER_ID)
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(blocageCreate).not.toHaveBeenCalled()
+    expect(blocageDeleteMany).not.toHaveBeenCalled()
+    expect(conversationFindFirst).not.toHaveBeenCalled()
+  })
+
+  it("cible hors schema (0, négatif, hors Int32) : 'inconnue', zéro écriture", async () => {
+    await expect(bloquerUtilisateur(0)).resolves.toEqual({ ok: false, erreur: 'inconnue' })
+    await expect(bloquerUtilisateur(-1)).resolves.toEqual({ ok: false, erreur: 'inconnue' })
+    await expect(bloquerUtilisateur(2_147_483_648)).resolves.toEqual({ ok: false, erreur: 'inconnue' })
+
+    expect(blocageCreate).not.toHaveBeenCalled()
+  })
+
+  it("rôle admin : 'inconnue', zéro écriture (panne générique)", async () => {
+    vi.mocked(verifySession).mockResolvedValue({ userId: USER_ID, role: 'admin' })
+
+    const resultat = await bloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(blocageCreate).not.toHaveBeenCalled()
+  })
+
+  it("DAL qui lève : 'inconnue', log SANS donnée personnelle", async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    blocageCreate.mockImplementation(async () => {
+      throw new Error('DB_DOWN')
+    })
+
+    const resultat = await bloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(consoleError).toHaveBeenCalledTimes(1)
+    const [marque, donnees] = consoleError.mock.calls[0] ?? []
+    expect(marque).toBe('[messagerie] blocage')
+    expect(donnees).toEqual({ cibleUserId: AUTRE_USER_ID, code: 'INCONNU' })
+    // Le code est loggé, l'IDENTITÉ de la session jamais.
+    expect(JSON.stringify(donnees)).not.toContain(String(USER_ID))
+
+    consoleError.mockRestore()
+  })
+
+  it('ni seau ni hook M9 sur le blocage', async () => {
+    await bloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(checkRateLimit).not.toHaveBeenCalled()
+    expect(recordAttempt).not.toHaveBeenCalled()
+    expect(messageEnvoye).not.toHaveBeenCalled()
+    expect(messageLu).not.toHaveBeenCalled()
+    expect(messageCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe('debloquerUtilisateur', () => {
+  it('deleteMany appelé sur la BONNE PAIRE ; 0 ligne supprimée → { ok: true } quand même', async () => {
+    // 0 ligne = « déjà débloqué » : le verdict doit être IDENTIQUE à un
+    // déblocage réel (idempotence visible par l'utilisateur).
+    blocageDeleteMany.mockImplementation(async () => ({ count: 0 }))
+
+    const resultat = await debloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(resultat).toEqual({ ok: true })
+    expect(blocageDeleteMany).toHaveBeenCalledTimes(1)
+    expect(blocageDeleteMany.mock.calls[0]?.[0].where).toEqual({
+      bloqueurId: USER_ID,
+      bloqueId: AUTRE_USER_ID,
+    })
+    // Léver ne crée JAMAIS : aucune écriture de plus.
+    expect(blocageCreate).not.toHaveBeenCalled()
+  })
+
+  it("auto-déblocage (cible = moi) : 'inconnue', ZÉRO écriture", async () => {
+    const resultat = await debloquerUtilisateur(USER_ID)
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(blocageDeleteMany).not.toHaveBeenCalled()
+  })
+
+  it("deleteMany qui lève : 'inconnue', log sans donnée personnelle", async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    blocageDeleteMany.mockImplementation(async () => {
+      throw new Error('DB_DOWN')
+    })
+
+    const resultat = await debloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(consoleError).toHaveBeenCalledWith('[messagerie] deblocage', {
+      cibleUserId: AUTRE_USER_ID,
+      code: 'INCONNU',
+    })
+
+    consoleError.mockRestore()
+  })
+
+  it("rôle admin : 'inconnue', zéro écriture", async () => {
+    vi.mocked(verifySession).mockResolvedValue({ userId: USER_ID, role: 'admin' })
+
+    const resultat = await debloquerUtilisateur(AUTRE_USER_ID)
+
+    expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
+    expect(blocageDeleteMany).not.toHaveBeenCalled()
   })
 })
