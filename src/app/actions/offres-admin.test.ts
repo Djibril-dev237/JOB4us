@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Prisma } from '@prisma/client'
 
 import { verifyRole } from '@/lib/dal'
+import { offreIndisponible } from '@/lib/evenements-offres'
 import { notFound, redirect } from 'next/navigation'
 
 import { releverOffre, suspendreOffre } from './offres-admin'
@@ -44,6 +45,16 @@ vi.mock('@/lib/prisma', () => ({
     offre: { findFirst: offreFindFirst, updateMany: offreUpdateMany },
   },
 }))
+
+// Spy exécutant le no-op réel (M9) : « appelé une fois avec l'id » est
+// vérifiable, et aucun verdict ne peut en dépendre.
+vi.mock('@/lib/evenements-offres', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/evenements-offres')>()
+  return {
+    offrePubliee: vi.fn(original.offrePubliee),
+    offreIndisponible: vi.fn(original.offreIndisponible),
+  }
+})
 
 // Dans Next, redirect() et notFound() sont des exceptions de contrôle :
 // les mocks lèvent aussi, sinon l'exécution continuerait après le verdict
@@ -95,6 +106,9 @@ describe('suspendreOffre (T8)', () => {
     })
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?maj=suspendue')
+    // Événement M9 (no-op) : la suspension retire l'offre de la visibilité.
+    expect(offreIndisponible).toHaveBeenCalledTimes(1)
+    expect(offreIndisponible).toHaveBeenCalledWith({ offreId: 42 })
   })
 
   it('refus (count 0 : déjà suspendue ou course) → ?erreur=statut, jamais ?maj=', async () => {
@@ -104,6 +118,8 @@ describe('suspendreOffre (T8)', () => {
 
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?erreur=statut')
+    // Aucune suspension → aucun événement.
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 })
 
@@ -119,6 +135,8 @@ describe('releverOffre (T9)', () => {
     })
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?maj=levee')
+    // Levée = brouillon : rien n'est de nouveau visible → AUCUN événement.
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 
   it('refus (count 0 : offre relevée entre-temps) → ?erreur=statut', async () => {

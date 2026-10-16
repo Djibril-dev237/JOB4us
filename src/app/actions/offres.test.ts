@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { verifyRole } from '@/lib/dal'
 import { ERREUR_CATEGORIE_INCONNUE } from '@/lib/definitions'
+import { offreIndisponible, offrePubliee } from '@/lib/evenements-offres'
 import {
   entrepriseDuCompte,
   lireOffreGestion,
@@ -83,6 +84,16 @@ vi.mock('@/lib/offres-dal', () => ({
   lireOffreGestion: vi.fn(),
   lireOffreModifiable: vi.fn(),
 }))
+
+// Spies exécutant les no-ops réels (M9) : « appelé une fois avec l'id »
+// est vérifiable, et aucun verdict ne peut en dépendre.
+vi.mock('@/lib/evenements-offres', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/evenements-offres')>()
+  return {
+    offrePubliee: vi.fn(original.offrePubliee),
+    offreIndisponible: vi.fn(original.offreIndisponible),
+  }
+})
 
 // Le seau D6 est mocké (contrôle de sa valeur et de sa fenêtre) MAIS les
 // constantes de politique sont celles du module réel : un écart de fenêtre
@@ -611,6 +622,10 @@ describe('publierOffre', () => {
     expect(offreCount).toHaveBeenCalledWith({
       where: { entrepriseId: ENTREPRISE_ID, statut: 'publiee', deletedAt: null },
     })
+    // Événement M9 (no-op) : émis UNE fois, après CAS réussi, avec l'id lu.
+    expect(offrePubliee).toHaveBeenCalledTimes(1)
+    expect(offrePubliee).toHaveBeenCalledWith({ offreId: OFFRE_ID })
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 
   it('refuse depuis un statut autre que brouillon : ?erreur=statut', async () => {
@@ -620,6 +635,7 @@ describe('publierOffre', () => {
 
     expect(transaction).not.toHaveBeenCalled()
     expect(offreUpdateMany).not.toHaveBeenCalled()
+    expect(offrePubliee).not.toHaveBeenCalled()
   })
 
   it('refuse une offre déjà expirée : ?erreur=date (D3)', async () => {
@@ -646,6 +662,8 @@ describe('publierOffre', () => {
     await attendRedirection(publierOffre(formOf(FORMULAIRE)), '/recruteur/offres?erreur=statut')
 
     expect(appelUpdateMany()?.where).toMatchObject({ statut: 'brouillon' })
+    // Jamais deux fois : le rejeu ne produit pas un second événement.
+    expect(offrePubliee).not.toHaveBeenCalled()
   })
 
   it('répond 404 pour une offre étrangère, sans ?erreur= ni écriture', async () => {
@@ -669,6 +687,10 @@ describe('cloturerOffre', () => {
       where: { id: OFFRE_ID, entrepriseId: ENTREPRISE_ID, statut: 'publiee', deletedAt: null },
       data: { statut: 'cloturee' },
     })
+    // Événement M9 (no-op) : la clôture retire l'offre de la visibilité.
+    expect(offreIndisponible).toHaveBeenCalledTimes(1)
+    expect(offreIndisponible).toHaveBeenCalledWith({ offreId: OFFRE_ID })
+    expect(offrePubliee).not.toHaveBeenCalled()
   })
 
   it('reste autorisée sur une publiée EXPIRÉE (T11 : fermer est toujours sur)', async () => {
@@ -689,6 +711,7 @@ describe('cloturerOffre', () => {
 
     await attendRedirection(cloturerOffre(formOf(FORMULAIRE)), '/recruteur/offres?erreur=statut')
     expect(offreUpdateMany).toHaveBeenCalledTimes(1)
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 
   it('répond 404 (et jamais ?erreur=) pour une offre étrangère', async () => {
@@ -709,6 +732,10 @@ describe('rouvrirOffre', () => {
       where: { id: OFFRE_ID, entrepriseId: ENTREPRISE_ID, statut: 'cloturee', deletedAt: null },
       data: { statut: 'brouillon' },
     })
+    // Rouvrir = repasser en brouillon : rien n'est de nouveau visible,
+    // AUCUN événement M9 ne part (offrePubliee comme offreIndisponible).
+    expect(offrePubliee).not.toHaveBeenCalled()
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 
   it('refuse si la source n’est pas clôturée : ?erreur=statut', async () => {
@@ -812,6 +839,10 @@ describe('supprimerOffre', () => {
     // Jamais de suppression physique : updateMany est la seule écriture.
     expect(offreCreate).not.toHaveBeenCalled()
     expect(offreUpdate).not.toHaveBeenCalled()
+    // Événement M9 (no-op) : la suppression logique retire l'offre de la
+    // visibilité, même famille que clôture et suspension.
+    expect(offreIndisponible).toHaveBeenCalledTimes(1)
+    expect(offreIndisponible).toHaveBeenCalledWith({ offreId: OFFRE_ID })
   })
 
   it('refuse un second passage (ligne déjà supprimée) : ?erreur=statut', async () => {
@@ -826,6 +857,8 @@ describe('supprimerOffre', () => {
       entrepriseId: ENTREPRISE_ID,
       deletedAt: null,
     })
+    // Second passage refusé (count 0) : aucun événement.
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 
   it('répond 404 pour une offre étrangère, sans y toucher', async () => {

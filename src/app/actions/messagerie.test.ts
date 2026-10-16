@@ -4,7 +4,11 @@ import type { Prisma as NsPrisma } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { verifySession } from '@/lib/dal'
-import { messageEnvoye, messageLu } from '@/lib/evenements-messagerie'
+import {
+  messageEnvoye,
+  messageLu,
+  signalementRecu,
+} from '@/lib/evenements-messagerie'
 import {
   MESSAGERIE_ENVOI_WINDOW_MS,
   MESSAGERIE_MAX_ENVOIS_PAR_COMPTE,
@@ -219,6 +223,7 @@ vi.mock('@/lib/evenements-messagerie', async (importOriginal) => {
     messageEnvoye: vi.fn(original.messageEnvoye),
     messageLu: vi.fn(original.messageLu),
     conversationCreee: vi.fn(original.conversationCreee),
+    signalementRecu: vi.fn(original.signalementRecu),
   }
 })
 
@@ -660,6 +665,11 @@ describe('signalerMessage — signalement valide', () => {
     // L'identité du signalant sort de la SESSION, jamais du payload.
     expect(resultat).toEqual({ ok: true, deja: false })
 
+    // Événement M9 (no-op) : émis UNE fois sur création réelle, pointeurs
+    // seuls — jamais le motif.
+    expect(signalementRecu).toHaveBeenCalledTimes(1)
+    expect(signalementRecu).toHaveBeenCalledWith({ messageId: MESSAGE_ID, auteurId: USER_ID })
+
     // Le `where` de l'unique lecture porte participation + « pas mes
     // propres messages » (contrôles portés par la base, pas re-vérifiés).
     expect(messageFindFirst.mock.calls[0]?.[0]?.where).toEqual({
@@ -685,6 +695,9 @@ describe('signalerMessage — signalement valide', () => {
     expect(resultat).toEqual({ ok: true, deja: true })
     // Un seul create : le doublon est absorbé, jamais réécrit.
     expect(signalementCreate).toHaveBeenCalledTimes(1)
+    // Idempotence de l'événement : 'existant' ne repart JAMAIS — la même
+    // requête rejouée ne produit jamais un second événement.
+    expect(signalementRecu).not.toHaveBeenCalled()
   })
 
   it('le signalement reste possible MÊME bloqué : AUCUNE lecture ni écriture de blocage', async () => {
@@ -700,11 +713,14 @@ describe('signalerMessage — signalement valide', () => {
     expect(blocageCreate).not.toHaveBeenCalled()
   })
 
-  it('ni seau ni hook M9 : checkRateLimit/recordAttempt/messageEnvoye/messageLu JAMAIS appelés', async () => {
+  it("ni seau ni hook d'envoi : checkRateLimit/recordAttempt/messageEnvoye/messageLu JAMAIS appelés", async () => {
     messageFindFirst.mockImplementation(async () => ({ id: MESSAGE_ID }))
 
     await signalerMessage({ messageId: MESSAGE_ID, motif: 'Motif légitime' })
 
+    // Le signalement n'a ni budget minuté, ni envoi de message : les hooks
+    // de M8 restent muets (seul `signalementRecu` de M9 part, vérifié ci-
+    // haut).
     expect(checkRateLimit).not.toHaveBeenCalled()
     expect(recordAttempt).not.toHaveBeenCalled()
     expect(messageEnvoye).not.toHaveBeenCalled()
@@ -726,6 +742,8 @@ describe('signalerMessage — refus sans effet de bord', () => {
 
     expect(resultat).toEqual({ ok: false, erreur: 'inconnue' })
     expect(signalementCreate).not.toHaveBeenCalled()
+    // Aucune création → aucun événement M9 (le hook ne part que sur 'cree').
+    expect(signalementRecu).not.toHaveBeenCalled()
     // Le refus vient du `where` (une lecture a bien eu lieu), pas d'un
     // court-circuit de l'action.
     expect(messageFindFirst).toHaveBeenCalledTimes(1)

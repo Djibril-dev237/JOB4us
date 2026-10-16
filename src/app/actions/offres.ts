@@ -10,6 +10,7 @@ import {
   type OffreFormData,
 } from '@/lib/definitions'
 import { estExpiree } from '@/lib/douala'
+import { offreIndisponible, offrePubliee } from '@/lib/evenements-offres'
 import { formDataString, issuesToErrors } from '@/lib/form-errors'
 import { entrepriseDuCompte, lireOffreGestion, lireOffreModifiable } from '@/lib/offres-dal'
 import { MESSAGES_ERREUR_TRANSITION, OFFRES_ACTIVES_MAX } from '@/lib/offres-labels'
@@ -355,6 +356,11 @@ export async function publierOffre(formData: FormData): Promise<void> {
     redirect('/recruteur/offres?erreur=statut')
   }
 
+  // Événement M9 (no-op aujourd'hui) : la publication rend l'offre VISIBLE,
+  // c'est le seul moment où les admins doivent être prévenus (jamais à la
+  // réouverture T5 ni à la levée T9 : la cible est alors un brouillon).
+  offrePubliee({ offreId: id })
+
   redirect('/recruteur/offres?maj=publiee')
 }
 
@@ -365,12 +371,18 @@ export async function publierOffre(formData: FormData): Promise<void> {
  *
  * Aucun contrôle de date ici : T4 reste autorisée sur une publiée EXPIRÉE
  * (fermer est toujours sur) et T5 ne rouvre qu'une clôturée.
+ *
+ * `apresSucces` (optionnel) s'exécute APRÈS le CAS réussi et AVANT la
+ * redirection : c'est le point de branchement M9 des hooks d'événements,
+ * appelé exactement quand la transition a réellement eu lieu (jamais sur
+ * un refus, jamais deux fois pour un double clic — le CAS est maître).
  */
 async function executerTransitionStatut(
   formData: FormData,
   source: 'publiee' | 'cloturee',
   cible: 'cloturee' | 'brouillon',
   cleMaj: 'cloturee' | 'rouverte',
+  apresSucces?: (offreId: number) => void,
 ): Promise<void> {
   const session = await verifyRole('recruteur')
   const entrepriseId = await entrepriseDuCompte(session.userId)
@@ -392,12 +404,20 @@ async function executerTransitionStatut(
     redirect('/recruteur/offres?erreur=statut')
   }
 
+  apresSucces?.(id)
+
   redirect(`/recruteur/offres?maj=${cleMaj}`)
 }
 
 /** T4 : publiée (y compris expirée) → clôturée. */
 export async function cloturerOffre(formData: FormData): Promise<void> {
-  await executerTransitionStatut(formData, 'publiee', 'cloturee', 'cloturee')
+  await executerTransitionStatut(formData, 'publiee', 'cloturee', 'cloturee', (offreId) => {
+    // Événement M9 (no-op aujourd'hui) : la clôture retire l'offre de la
+    // visibilité — les candidats concernés seront prévenus. Le CAS ci-dessus
+    // a déjà prouvé que la transition a eu lieu ; le rejeu d'une clôture
+    // (déjà clôturée) ne repart jamais (count 0 → refus, hook non appelé).
+    offreIndisponible({ offreId })
+  })
 }
 
 /** T5 : clôturée → brouillon. */
@@ -511,6 +531,10 @@ export async function supprimerOffre(formData: FormData): Promise<void> {
   if (resultat.count === 0) {
     redirect('/recruteur/offres?erreur=statut')
   }
+
+  // Événement M9 (no-op aujourd'hui) : la suppression logique retire
+  // l'offre de la visibilité — même famille que clôture/suspension.
+  offreIndisponible({ offreId: id })
 
   redirect('/recruteur/offres?maj=supprimee')
 }

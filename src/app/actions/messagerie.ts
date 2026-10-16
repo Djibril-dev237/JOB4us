@@ -3,7 +3,11 @@
 import { Prisma } from '@prisma/client'
 
 import { verifySession } from '@/lib/dal'
-import { messageEnvoye, messageLu } from '@/lib/evenements-messagerie'
+import {
+  messageEnvoye,
+  messageLu,
+  signalementRecu,
+} from '@/lib/evenements-messagerie'
 import { nettoyerMessage, nettoyerMotif } from '@/lib/messagerie-contenu'
 import {
   avancerLecture,
@@ -364,8 +368,10 @@ export type ResultatSignalement =
  *
  * AUCUN seau : l'Étape 2 n'impose de budget minuté que pour l'envoi de
  * messages ; décourager un signalement légitime par « trop de
- * signalements » protégerait le harceleur, pas la victime. AUCUN hook M9 :
- * aucun événement de signalement n'existe au catalogue (evenements-messagerie).
+ * signalements » protégerait le harceleur, pas la victime. Un SEUL hook
+ * M9 : `signalementRecu`, émis UNIQUEMENT sur une création réelle ('cree')
+ * — le verdict 'existant' (déjà signalé par ce compte) ne repart jamais,
+ * l'idempotence vit dans le verdict du DAL.
  *
  * Le blocage n'est JAMAIS interrogé ici (cf. l'en-tête du fichier).
  */
@@ -399,6 +405,11 @@ export async function signalerMessage(payload: {
     const verdict = await ecrireSignalement(parse.data.messageId, session.userId, motifPropre)
     if (verdict === null) {
       return { ok: false, erreur: 'inconnue' }
+    }
+    if (verdict === 'cree') {
+      // Événement M9 (no-op aujourd'hui) : pointeurs seuls — le motif
+      // nettoyé et l'identité du signalant ne quittent jamais cette requête.
+      signalementRecu({ messageId: parse.data.messageId, auteurId: session.userId })
     }
     return { ok: true, deja: verdict === 'existant' }
   } catch (erreur) {

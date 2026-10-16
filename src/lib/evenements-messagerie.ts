@@ -3,7 +3,8 @@
 // M9 s'installera ICI, jamais dans les actions :
 //  * `conversationCreee` → notification au recruteur « nouveau échange » ;
 //  * `messageEnvoye`     → notification « nouveau message de X » ;
-//  * `messageLu`         → acquittement optionnel (M9 arbitre).
+//  * `messageLu`         → acquittement optionnel (M9 arbitre) ;
+//  * `signalementRecu`   → notification aux admins « signalement à examiner ».
 //
 // Contrats de ce module, à respecter même après branchement :
 //  * AUCUN import Prisma runtime, AUCUN log, aucun 'use server' — ce ne
@@ -39,6 +40,16 @@ export interface EvenementMessageLu {
   lecteurId: number
 }
 
+/**
+ * Signalement CRÉÉ (et non déjà existant) — pointeurs vers la ligne
+ * d'origine (clé unique message × auteur) pour que M9 relise le
+ * signalement et resolve ses destinataires admins côté serveur.
+ */
+export interface EvenementSignalementRecu {
+  messageId: number
+  auteurId: number
+}
+
 /** M9 branchera ICI la notification « nouvelle conversation ». */
 export function conversationCreee(_evenement: EvenementConversationCreee): void {
   // no-op (M9) — `void` consomme l'argument du contrat sans logique
@@ -54,6 +65,12 @@ export function messageEnvoye(_evenement: EvenementMessageEnvoye): void {
 
 /** M9 branchera ICI l'acquittement de lecture, s'il le retient. */
 export function messageLu(_evenement: EvenementMessageLu): void {
+  // no-op (M9) — cf. ci-dessus.
+  void _evenement
+}
+
+/** M9 branchera ICI la notification aux admins (modération). */
+export function signalementRecu(_evenement: EvenementSignalementRecu): void {
   // no-op (M9) — cf. ci-dessus.
   void _evenement
 }

@@ -3,6 +3,7 @@
 import { notFound, redirect } from 'next/navigation'
 
 import { verifyRole } from '@/lib/dal'
+import { offreIndisponible } from '@/lib/evenements-offres'
 import { formDataString } from '@/lib/form-errors'
 import { lireOffrePourAdmin } from '@/lib/offres-dal'
 import { prisma } from '@/lib/prisma'
@@ -71,6 +72,11 @@ export async function suspendreOffre(formData: FormData): Promise<void> {
   if (resultat.count === 0) {
     redirect('/admin/offres?erreur=statut')
   }
+
+  // Événement M9 (no-op aujourd'hui) : la suspension retire l'offre de la
+  // visibilité — les candidats concernés seront prévenus (la levée T9,
+  // cible brouillon, n'émet rien : rien n'est de nouveau visible).
+  offreIndisponible({ offreId: id })
 
   redirect('/admin/offres?maj=suspendue')
 }
