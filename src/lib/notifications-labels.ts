@@ -263,6 +263,15 @@ export function texteGroupeMessages(compteur: number): string {
 // source (règle anti-vibecoding), apostrophes et espacement de ponctuation
 // compris. Aucun tiret cadratin, aucune mention d'outil.
 
+/**
+ * Nom de l'application — CONSTANTE DE MARQUE (pas une phrase, pas un
+ * libellé produit) : les modules d'emails préfixent leurs sujets avec.
+ * Source unique : `TEXTES.sujetEmailResume` recopie déjà ce nom dans ses
+ * phrases verrouillées de l'Étape 4 ; le code qui doit l'assembler
+ * (préfixe de sujet) importe ICI, jamais une copie locale.
+ */
+export const NOM_APPLICATION = 'Job4Us'
+
 export const TEXTES = {
   // Page /notifications (liste).
   titreNotifications: 'Notifications',
