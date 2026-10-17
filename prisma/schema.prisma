@@ -36,6 +36,9 @@ model User {
   signalementsEmis  Signalement[]     @relation("SignalementAuteur")
   signalementsTraites Signalement[]   @relation("SignalementTraite")
   notifications     Notification[]
+  notificationsReglages NotificationReglage[]
+  notificationsPreferences NotificationPreference[]
+  emailsNotifications EmailNotification[] @relation("EmailsNotification")
   offresSauvegardees OffreSauvegardee[]
   accounts          Account[]
   sessions          Session[]
@@ -553,21 +556,155 @@ model AuditConversation {
   @@map("audit_conversations")
 }
 
+// NOTIFICATION IN-APP (M9) — reprise du miroir legacy, durcie :
+//  * `type` passe de VARCHAR à l'ENUM FERMÉ du catalogue (9 valeurs du
+//    module notifications-labels) : un type hors catalogue est structurel-
+//    ment impossible ;
+//  * `cle` est l'IDEMPOTENCE : clé déterministe calculée par l'émission
+//    (`type:ref:destinataire`), unique — un événement rejoué ne produit
+//    jamais une seconde notification, le create lève P2002 ;
+//  * `compteur` + `dernierRefId` portent le REGROUPEMENT : une seule ligne
+//    par conversation pour `nouveauMessage`, compteur incrémenté à chaque
+//    message RÉELLEMENT nouveau (`dernierRefId` = id du dernier message
+//    traité, rejou d'un message déjà compté = aucun incrément) ;
+//  * cycle de vie : nonLue → lue (`lueLe`) → archivee (`archiveeLe`, 30 j
+//    après la lecture par le cron) → purge (90 j après archivage) ;
+//  * `isLu` garde son nom legacy : le compteur de la cloche M2
+//    (header.tsx) reste littéralement inchangé.
+//
+// Les colonnes `titre`/`contenu`/`lien` sont remplies À L'ÉMISSION par la
+// fabrique `texteNotification()` (TEXTES unique) et les liens vers les
+// PAGES PROPRES de l'utilisateur — jamais la ressource, jamais un texte de
+// message, jamais une coordonnée (règle de confidentialité Étape 2).
+// ---------------------------------------------------------------------------
+enum TypeNotification {
+  candidatureRecue
+  statutCandidature
+  candidatureRetiree
+  nouveauMessage
+  offreIndisponible
+  signalementRecu
+  offrePubliee
+  entrepriseCertifiee
+  // 9e type ajouté à l'arbitrage de la Vague 1 : la notification legacy
+  // « nouvel utilisateur inscrit » (RegisterController.php, parité M4)
+  // s'adressait aux admins et n'avait pas d'équivalent au catalogue —
+  // in-app SEULEMENT (legacy n'envoyait aucun email).
+  systeme
+
+  @@map("notifications_type")
+}
+
 model Notification {
-  id         Int      @id @default(autoincrement())
-  userId     Int      @map("user_id")
-  type       String   @db.VarChar(100)
-  titre      String   @db.VarChar(200)
-  contenu    String?  @db.Text
-  isLu       Boolean  @default(false) @map("is_lu")
-  lien       String?
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id           Int              @id @default(autoincrement())
+  userId       Int              @map("user_id")
+  type         TypeNotification
+  cle          String           @unique @db.VarChar(200)
+  titre        String           @db.VarChar(200)
+  contenu      String?          @db.Text
+  isLu         Boolean          @default(false) @map("is_lu")
+  compteur     Int              @default(1)
+  dernierRefId Int?             @map("dernier_ref_id")
+  lueLe        DateTime?        @map("lue_le")
+  archiveeLe   DateTime?        @map("archivee_le")
+  lien         String?
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails       EmailNotification[]
 
-  @@index([userId], map: "notifications_user_id_fkey")
+  // Compteur de la cloche (header M2) : `userId + isLu = false`.
+  @@index([userId, isLu], map: "notifications_user_lu_idx")
+  // Liste paginée par curseur [createdAt, id] (les archivées sont filtrées
+  // en séléction, pas en index).
+  @@index([userId, createdAt], map: "notifications_user_created_idx")
+  // Cron d'archivage : WHERE isLu = true AND archiveeLe IS NULL AND lueLe < seuil.
+  @@index([isLu, lueLe], map: "notifications_archivage_idx")
+  // Cron de purge : WHERE archiveeLe < seuil.
+  @@index([archiveeLe], map: "notifications_purge_idx")
   @@map("notifications")
+}
+
+// PRÉFÉRENCE PAR TYPE (M9) — ligne ABSENTE = défaut du catalogue
+// (preferencesParDefaut(), jamais de seed) : seul l'écart est stocké.
+// `signalementRecu` n'a AUCUNE ligne possible (non désactivable) : l'émission
+// ignore les préférences pour ce type (devoir de modération).
+// ---------------------------------------------------------------------------
+model NotificationPreference {
+  id          Int              @id @default(autoincrement())
+  userId      Int              @map("user_id")
+  type        TypeNotification
+  emailActive Boolean          @map("email_active")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@map("notification_preferences")
+}
+
+// RÉGLAGES PAR COMPTE (M9) — ligne ABSENTE = défauts ci-dessous :
+//  * `emailsActives` : le KILL SWITCH du désabonnement 1-clic (faux = plus
+//    aucun email métier, in-app inchangé) ; `signalementRecu` le traverse
+//    toujours (sécurité) ;
+//  * `resumeQuotidien` : digest OFF par défaut (arbitrage Étape 2).
+// ---------------------------------------------------------------------------
+model NotificationReglage {
+  userId          Int       @id @map("user_id")
+  emailsActives   Boolean   @default(true) @map("emails_actives")
+  resumeQuotidien Boolean   @default(false) @map("resume_quotidien")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_reglages")
+}
+
+enum StatutEmail {
+  enAttente
+  envoye
+  abandonne
+
+  @@map("emails_statut")
+}
+
+// OUTBOX EMAILS (M9) — file d'attente DURABLE entre l'émission et l'envoi :
+//  * `cle` idempotence (un événement rejoué = UNE ligne) ;
+//  * échec d'envoi JAMAIS bloquant : `tentatives` + `prochaineTentative`
+//    (reprise), puis `abandonne` propre après le plafond de tentatives —
+//    l'action métier n'attend jamais Resend ;
+//  * `erreur` = message technique TRONQUÉ, jamais de donnée personnelle ;
+//  * plafonds 6/h et 30/j par destinataire : comptés sur `createdAt` ;
+//  * digest quotidien : `notificationId`/`type` nuls + `resumeDu` (date de
+//    période) — l'unicité (destinataire, resumeDu) garantit UN digest par
+//    jour et par compte (les lignes non-digest ont `resumeDu` NULL, non
+//    conflitantes dans l'index unique MySQL).
+// ---------------------------------------------------------------------------
+model EmailNotification {
+  id               Int            @id @default(autoincrement())
+  cle              String         @unique @db.VarChar(200)
+  destinataireId   Int            @map("destinataire_id")
+  notificationId   Int?           @map("notification_id")
+  type             TypeNotification?
+  resumeDu         DateTime?      @map("resume_du")
+  statut           StatutEmail    @default(enAttente)
+  tentatives       Int            @default(0)
+  prochaineTentative DateTime?    @map("prochaine_tentative")
+  envoyeLe         DateTime?      @map("envoye_le")
+  erreur           String?        @db.VarChar(300)
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  destinataire     User           @relation("EmailsNotification", fields: [destinataireId], references: [id], onDelete: Cascade)
+  notification     Notification?  @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  // Ramassage de la file : WHERE statut = enAttente AND prochaineTentative < now.
+  @@index([statut, prochaineTentative], map: "emails_drain_idx")
+  // Plafonds 6/h et 30/j par destinataire (compté sur createdAt).
+  @@index([destinataireId, createdAt], map: "emails_plafond_idx")
+  // Digest : un seul résumé par compte et par jour (NULLs non conflitants).
+  @@unique([destinataireId, resumeDu], map: "emails_resume_uniq")
+  @@map("emails_notifications")
 }
 
 // ---------------------------------------------------------------------------

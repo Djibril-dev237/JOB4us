@@ -7,10 +7,12 @@
 // anti-vibecoding).
 //
 // Décisions qui se matérialisent ici (Étapes 2 et 4 validées) :
-//  * le CATALOGUE est une liste fermée de 8 types : toute notification
+//  * le CATALOGUE est une liste fermée de 9 types : toute notification
 //    appartient à `TypeNotification`, le schema Prisma (Vague 1) en reprend
 //    les valeurs telles quelles — aucun type libre, aucune inscription
-//    hors catalogue ;
+//    hors catalogue. (8 types validés en Étape 2, plus `systeme` ajouté par
+//    l'arbitrage de la Vague 1 pour la notification legacy « nouvel
+//    utilisateur inscrit » vers les admins, parité M4 — in-app seulement.)
 //  * chaque type porte ses métadonnées en UN SEUL endroit : libellé,
 //    description de préférence, défaut email, désactivabilité. Les pages,
 //    l'émission et les emails lisent ce tableau, jamais l'inverse ;
@@ -28,6 +30,8 @@
 // échappera en HTML) — ce module n'est pas un point d'échappement.
 // ---------------------------------------------------------------------------
 
+import type { RegisterRole } from '@/lib/definitions'
+
 /**
  * Catalogue fermé des notifications (source de vérité du module).
  * L'enum Prisma `TypeNotification` (Vague 1) reprend ces valeurs.
@@ -41,6 +45,7 @@ export const TYPE_NOTIFICATIONS = [
   'signalementRecu',
   'offrePubliee',
   'entrepriseCertifiee',
+  'systeme',
 ] as const
 
 export type TypeNotification = (typeof TYPE_NOTIFICATIONS)[number]
@@ -61,7 +66,9 @@ export interface MetadonneesType {
  * Table unique des métadonnées. Les 6 types de base partent par email par
  * défaut (validé Étape 3) ; les 2 repris du legacy secondaire sont in-app
  * seulement ; `signalementRecu` ne se désactive jamais (devoir de
- * modération, volume faible et constant).
+ * modération, volume faible et constant) ; `systeme` (9e type, arbitrage de
+ * la Vague 1) reste in-app SEULEMENT comme le legacy : RegisterController
+ * n'envoyait aucun email, l'admin n'a pas à être dérangé pour une inscription.
  */
 export const METADONNEES: Record<TypeNotification, MetadonneesType> = {
   candidatureRecue: {
@@ -109,6 +116,12 @@ export const METADONNEES: Record<TypeNotification, MetadonneesType> = {
   entrepriseCertifiee: {
     libelle: 'Entreprise certifiée',
     description: 'Voir les certifications d’entreprise.',
+    emailParDefaut: false,
+    desactivable: true,
+  },
+  systeme: {
+    libelle: 'Nouvel utilisateur inscrit',
+    description: 'Recevoir une notification quand un nouvel utilisateur crée un compte.',
     emailParDefaut: false,
     desactivable: true,
   },
@@ -162,6 +175,12 @@ export interface VariablesOffrePubliee {
 export interface VariablesEntrepriseCertifiee {
   nomEntreprise: string
 }
+export interface VariablesSysteme {
+  /** Nom du nouvel inscrit — l'admin destinataire est le gestionnaire des comptes. */
+  acteur: string
+  /** Rôle déclaré à l'inscription : union FERMÉE, jamais une chaîne libre. */
+  role: RegisterRole
+}
 
 export type VariablesNotification =
   | ({ type: 'candidatureRecue' } & VariablesCandidatureRecue)
@@ -173,6 +192,7 @@ export type VariablesNotification =
   | { type: 'signalementRecu' }
   | ({ type: 'offrePubliee' } & VariablesOffrePubliee)
   | ({ type: 'entrepriseCertifiee' } & VariablesEntrepriseCertifiee)
+  | ({ type: 'systeme' } & VariablesSysteme)
 
 /** Titre et contenu in-app d'une notification, du catalogue uniquement. */
 export function texteNotification(
@@ -217,7 +237,14 @@ export function texteNotification(
     case 'entrepriseCertifiee':
       return {
         titre: 'Entreprise certifiée',
-        contenu: `L’entreprise « ${variables.nomEntreprise} » a été certifiée.`,
+        contenu: `L’entreprise « ${variables.nomEntreprise} » a été certifiée.`,
+      }
+    case 'systeme':
+      // Parité exacte avec RegisterController.php (M4) : même phrase, aucun
+      // email (METADONNEES.emailParDefaut = false).
+      return {
+        titre: 'Nouvel utilisateur inscrit',
+        contenu: `${variables.acteur} vient de créer un compte ${variables.role}.`,
       }
   }
 }

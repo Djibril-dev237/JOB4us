@@ -26,6 +26,7 @@ import {
   checkRateLimit,
   recordAttempt,
 } from '@/lib/rate-limit'
+import { texteNotification } from '@/lib/notifications-labels'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -190,7 +191,10 @@ export async function register(
       }
 
       // Parité legacy (RegisterController.php) : notification "systeme"
-      // à chaque administrateur.
+      // à chaque administrateur. M9 : clé d'idempotence déterministe par
+      // (inscription, admin) — un rejeu lève P2002, absorbé par
+      // skipDuplicates, donc JAMAIS un doublon ; les textes viennent de la
+      // fabrique unique, plus une phrase écrite ici.
       const admins = await tx.user.findMany({
         where: { role: 'admin' },
         select: { id: true },
@@ -200,10 +204,11 @@ export async function register(
           data: admins.map((admin) => ({
             userId: admin.id,
             type: 'systeme',
-            titre: 'Nouvel utilisateur inscrit',
-            contenu: `${data.name} vient de créer un compte ${role}.`,
+            cle: `systeme:inscription:${user.id}:${admin.id}`,
+            ...texteNotification({ type: 'systeme', acteur: data.name, role }),
             lien: '/admin/utilisateurs',
           })),
+          skipDuplicates: true,
         })
       }
     })

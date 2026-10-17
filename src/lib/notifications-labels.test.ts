@@ -12,15 +12,16 @@ import {
 } from './notifications-labels'
 
 // ─── Contrats inter-SA (M9, pré-vague) ───────────────────────────────────────
-// Verrouillent ce que les vagues suivantes importent : catalogue FERMÉ de 8
-// types (l'enum Prisma de la Vague 1 en reprendra les valeurs), métadonnées
-// complètes pour chaque type, défauts dérivés (jamais de seed), fabrique de
-// texte à variables FERMÉE (règle de confidentialité structurelle), table
-// TEXTES verrouillée mot pour mot (règle anti-vibecoding).
+// Verrouillent ce que les vagues suivantes importent : catalogue FERMÉ de 9
+// types (l'enum Prisma de la Vague 1 en reprend les valeurs ; `systeme`
+// ajouté par l'arbitrage de la Vague 1), métadonnées complètes pour chaque
+// type, défauts dérivés (jamais de seed), fabrique de texte à variables
+// FERMÉE (règle de confidentialité structurelle), table TEXTES verrouillée
+// mot pour mot (règle anti-vibecoding).
 // ---------------------------------------------------------------------------
 
 describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
-  it('expose exactement les 8 types du catalogue validé', () => {
+  it('expose exactement les 9 types du catalogue validé', () => {
     expect([...TYPE_NOTIFICATIONS].sort()).toEqual(
       [
         'candidatureRecue',
@@ -31,6 +32,7 @@ describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
         'offrePubliee',
         'signalementRecu',
         'statutCandidature',
+        'systeme',
       ].sort(),
     )
   })
@@ -45,7 +47,7 @@ describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
     }
   })
 
-  it('les 6 types de base partent par email par défaut ; les 2 secondaires non', () => {
+  it('les 6 types de base partent par email par défaut ; les 3 secondaires non', () => {
     expect(METADONNEES.candidatureRecue.emailParDefaut).toBe(true)
     expect(METADONNEES.statutCandidature.emailParDefaut).toBe(true)
     expect(METADONNEES.candidatureRetiree.emailParDefaut).toBe(true)
@@ -55,6 +57,8 @@ describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
     // Secondaires repris du legacy : in-app seulement (Étape 3 validée).
     expect(METADONNEES.offrePubliee.emailParDefaut).toBe(false)
     expect(METADONNEES.entrepriseCertifiee.emailParDefaut).toBe(false)
+    // 9e type (arbitrage Vague 1) : legacy n'envoyait aucun email.
+    expect(METADONNEES.systeme.emailParDefaut).toBe(false)
   })
 
   it('seul signalementRecu est non désactivable (devoir de modération)', () => {
@@ -88,6 +92,7 @@ describe('texteNotification (fabrique à variables fermées)', () => {
       texteNotification({ type: 'signalementRecu' }),
       texteNotification({ type: 'offrePubliee', titreOffre: 'Développeur' }),
       texteNotification({ type: 'entrepriseCertifiee', nomEntreprise: 'ACME' }),
+      texteNotification({ type: 'systeme', acteur: 'Marie Dupont', role: 'candidat' }),
     ]
     for (const { titre, contenu } of productions) {
       expect(titre.length).toBeGreaterThan(0)
@@ -99,6 +104,15 @@ describe('texteNotification (fabrique à variables fermées)', () => {
     expect(texteNotification({ type: 'signalementRecu' })).toEqual({
       titre: 'Signalement reçu',
       contenu: 'Un nouveau signalement attend d’être examiné.',
+    })
+  })
+
+  it('systeme recopie la phrase legacy RegisterController (parité M4)', () => {
+    expect(
+      texteNotification({ type: 'systeme', acteur: 'Marie Dupont', role: 'recruteur' }),
+    ).toEqual({
+      titre: 'Nouvel utilisateur inscrit',
+      contenu: 'Marie Dupont vient de créer un compte recruteur.',
     })
   })
 
@@ -143,6 +157,6 @@ describe('TEXTES (table verrouillée, anti-vibecoding)', () => {
 describe('types exports (contrat TypeScript)', () => {
   it('TypeNotification accepte chaque membre du catalogue', () => {
     const tous: TypeNotification[] = [...TYPE_NOTIFICATIONS]
-    expect(tous).toHaveLength(8)
+    expect(tous).toHaveLength(9)
   })
 })
