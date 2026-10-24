@@ -28,7 +28,7 @@ import { prisma } from '@/lib/prisma'
 // `dateExpiration < seuil`.
 //
 // IDEMPOTENCE : une notification n'est émise que si sa clé
-// `offreIndisponible:<offreId>:<candidatId>` n'existe pas déjà. Un second
+// `offreIndisponible:<offreId>:<userId>` n'existe pas déjà. Un second
 // passage du cron ne crée donc rien. La fenêtre de rattrapage de 7 jours
 // borne le scan : elle rattrape une panne de planificateur, sans recréer
 // indéfiniment une notification que l'utilisateur a supprimée ou que le
@@ -88,16 +88,17 @@ export async function notifierOffresExpirees(
   const titres = new Map(offres.map((offre) => [offre.id, offre.titre]))
   const candidatures = await prisma.candidature.findMany({
     where: { offreId: { in: offres.map((offre) => offre.id) } },
-    select: { offreId: true, candidatId: true },
+    // `candidature.candidatId` est un Candidat.id : la notification vise le
+    // COMPTE (`candidat.userId`), comme le résolveur offreIndisponible.
+    select: {
+      offreId: true,
+      candidat: { select: { userId: true } },
+    },
     orderBy: [{ offreId: 'asc' }, { candidatId: 'asc' }],
   })
 
-  const cles = candidatures.map((candidature) =>
-    cleNotification(
-      'offreIndisponible',
-      candidature.offreId,
-      candidature.candidatId,
-    ),
+  const cles = candidatures.map(({ offreId, candidat }) =>
+    cleNotification('offreIndisponible', offreId, candidat.userId),
   )
 
   // Lecture en une requête : évite une vérification par candidat (N+1).
@@ -112,15 +113,16 @@ export async function notifierOffresExpirees(
 
   let notifications = 0
 
-  for (const { offreId, candidatId } of candidatures) {
+  for (const { offreId, candidat } of candidatures) {
     const titre = titres.get(offreId)
     if (titre === undefined) continue
 
-    const cle = cleNotification('offreIndisponible', offreId, candidatId)
+    const destinataireId = candidat.userId
+    const cle = cleNotification('offreIndisponible', offreId, destinataireId)
     if (dejaNotifies.has(cle)) continue
 
     const resultat = await emettreNotification({
-      destinataireId: candidatId,
+      destinataireId,
       type: 'offreIndisponible',
       refId: offreId,
       lien: '/candidat/candidatures',

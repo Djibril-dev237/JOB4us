@@ -49,22 +49,36 @@ interface ArgsCandidatureFindMany {
   select?: NsPrisma.CandidatureSelect
   distinct?: ('candidatId')[]
 }
+interface ArgsCandidatureFindUnique {
+  where?: NsPrisma.CandidatureWhereUniqueInput
+  select?: NsPrisma.CandidatureSelect
+}
 
-const { offreFindUnique, conversationFindUnique, userFindUnique, userFindMany, candidatureFindMany } =
-  vi.hoisted(() => ({
-    offreFindUnique: vi.fn<(args: ArgsOffreFindUnique) => Promise<unknown>>(),
-    conversationFindUnique: vi.fn<(args: ArgsConversationFindUnique) => Promise<unknown>>(),
-    userFindUnique: vi.fn<(args: ArgsUserFindUnique) => Promise<unknown>>(),
-    userFindMany: vi.fn<(args: ArgsUserFindMany) => Promise<unknown>>(),
-    candidatureFindMany: vi.fn<(args: ArgsCandidatureFindMany) => Promise<unknown>>(),
-  }))
+const {
+  offreFindUnique,
+  conversationFindUnique,
+  userFindUnique,
+  userFindMany,
+  candidatureFindMany,
+  candidatureFindUnique,
+} = vi.hoisted(() => ({
+  offreFindUnique: vi.fn<(args: ArgsOffreFindUnique) => Promise<unknown>>(),
+  conversationFindUnique: vi.fn<(args: ArgsConversationFindUnique) => Promise<unknown>>(),
+  userFindUnique: vi.fn<(args: ArgsUserFindUnique) => Promise<unknown>>(),
+  userFindMany: vi.fn<(args: ArgsUserFindMany) => Promise<unknown>>(),
+  candidatureFindMany: vi.fn<(args: ArgsCandidatureFindMany) => Promise<unknown>>(),
+  candidatureFindUnique: vi.fn<(args: ArgsCandidatureFindUnique) => Promise<unknown>>(),
+}))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     offre: { findUnique: offreFindUnique },
     conversation: { findUnique: conversationFindUnique },
     user: { findUnique: userFindUnique, findMany: userFindMany },
-    candidature: { findMany: candidatureFindMany },
+    candidature: {
+      findMany: candidatureFindMany,
+      findUnique: candidatureFindUnique,
+    },
   },
 }))
 
@@ -86,14 +100,22 @@ beforeEach(() => {
   userFindUnique.mockReset()
   userFindMany.mockReset()
   candidatureFindMany.mockReset()
+  candidatureFindUnique.mockReset()
   emettre.mockClear()
   offreFindUnique.mockResolvedValue(OFFRE)
   conversationFindUnique.mockResolvedValue({
-    candidature: { candidatId: 10, offre: OFFRE },
+    candidature: { candidat: { userId: 70 }, offre: OFFRE },
   })
   userFindUnique.mockResolvedValue({ name: 'Marie Dupont' })
   userFindMany.mockResolvedValue([{ id: 1 }, { id: 2 }])
-  candidatureFindMany.mockResolvedValue([{ candidatId: 10 }, { candidatId: 11 }])
+  candidatureFindMany.mockResolvedValue([
+    { candidatId: 10, candidat: { userId: 70 } },
+    { candidatId: 11, candidat: { userId: 71 } },
+  ])
+  candidatureFindUnique.mockResolvedValue({
+    candidat: { userId: 70 },
+    offre: { titre: 'Développeur' },
+  })
   vi.spyOn(console, 'error').mockImplementation(() => {}).mockClear()
 })
 
@@ -123,8 +145,37 @@ describe('notifierCandidatureRecue (recruteur = propriétaire courant)', () => {
 
 // ─── statutChange ───────────────────────────────────────────────────────────
 
-describe('notifierStatutChange (candidat = destinataire, libellé source unique)', () => {
-  it('notifie le CANDIDAT avec LIBELLES_STATUT[nouveauStatut], refId = candidatureId', async () => {
+describe('notifierStatutChange (compte candidat = destinataire, libellé source unique)', () => {
+  it('résout Candidat.id → User.id et notifie le CANDIDAT, refId = candidatureId', async () => {
+    await notifierStatutChange({
+      candidatureId: 5,
+      offreId: 3,
+      // Candidat.id (profil), volontairement différent du User.id (70).
+      candidatId: 10,
+      ancienStatut: 'envoyee' as StatutCandidature,
+      nouveauStatut: 'acceptee' as StatutCandidature,
+      acteurId: 50,
+    })
+
+    expect(candidatureFindUnique).toHaveBeenCalledWith({
+      where: { id: 5 },
+      select: {
+        candidat: { select: { userId: true } },
+        offre: { select: { titre: true } },
+      },
+    })
+    const args = emettre.mock.calls[0]?.[0]
+    expect(args?.destinataireId).toBe(70)
+    expect(args?.type).toBe('statutCandidature')
+    expect(args?.refId).toBe(5)
+    expect(args?.lien).toBe('/candidat/candidatures/5')
+    // Le libellé vient du tableau M7, jamais d'une phrase du résolveur.
+    expect(args?.variables).toMatchObject({ libelleStatut: 'Acceptée' })
+  })
+
+  it('candidature absente → aucune émission', async () => {
+    candidatureFindUnique.mockResolvedValue(null)
+
     await notifierStatutChange({
       candidatureId: 5,
       offreId: 3,
@@ -134,13 +185,7 @@ describe('notifierStatutChange (candidat = destinataire, libellé source unique)
       acteurId: 50,
     })
 
-    const args = emettre.mock.calls[0]?.[0]
-    expect(args?.destinataireId).toBe(10)
-    expect(args?.type).toBe('statutCandidature')
-    expect(args?.refId).toBe(5)
-    expect(args?.lien).toBe('/candidat/candidatures/5')
-    // Le libellé vient du tableau M7, jamais d'une phrase du résolveur.
-    expect(args?.variables).toMatchObject({ libelleStatut: 'Acceptée' })
+    expect(emettre).not.toHaveBeenCalled()
   })
 })
 
@@ -163,12 +208,12 @@ describe('notifierCandidatureRetiree (recruteur = propriétaire courant)', () =>
 // ─── messageEnvoye ──────────────────────────────────────────────────────────
 
 describe('notifierMessageEnvoye (autre participant, jamais soi-même)', () => {
-  it('candidat émetteur → notification au recruteur (entreprise.userId)', async () => {
+  it('candidat émetteur (User.id) → notification au recruteur (entreprise.userId)', async () => {
     conversationFindUnique.mockResolvedValue({
-      candidature: { candidatId: 10, offre: OFFRE },
+      candidature: { candidat: { userId: 70 }, offre: OFFRE },
     })
 
-    await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 10 })
+    await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 70 })
 
     const args = emettre.mock.calls[0]?.[0]
     expect(args?.destinataireId).toBe(50)
@@ -178,16 +223,21 @@ describe('notifierMessageEnvoye (autre participant, jamais soi-même)', () => {
     expect(args?.variables).toMatchObject({ type: 'nouveauMessage', acteur: 'Marie Dupont' })
   })
 
-  it('recruteur émetteur → notification au candidat', async () => {
+  it('recruteur émetteur → notification au COMPTE du candidat, jamais au Candidat.id', async () => {
+    conversationFindUnique.mockResolvedValue({
+      // Candidat.id = 10, User.id = 70 : seul le second est un destinataire.
+      candidature: { candidatId: 10, candidat: { userId: 70 }, offre: OFFRE },
+    })
+
     await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 50 })
 
-    expect(emettre.mock.calls[0]?.[0]?.destinataireId).toBe(10)
+    expect(emettre.mock.calls[0]?.[0]?.destinataireId).toBe(70)
   })
 
   it('auto-notification écartée (recruteur postulant à sa propre offre)', async () => {
-    // Les deux participants DÉRIVENT de la candidature et valent le même id.
+    // Les deux participants DÉRIVENT de la candidature et valent le même User.id.
     conversationFindUnique.mockResolvedValue({
-      candidature: { candidatId: 50, offre: OFFRE },
+      candidature: { candidat: { userId: 50 }, offre: OFFRE },
     })
 
     await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 50 })
@@ -197,14 +247,14 @@ describe('notifierMessageEnvoye (autre participant, jamais soi-même)', () => {
 
   it('conversation ou émetteur inconnus → aucune émission', async () => {
     conversationFindUnique.mockResolvedValue(null)
-    await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 10 })
+    await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 70 })
     expect(emettre).not.toHaveBeenCalled()
 
     conversationFindUnique.mockResolvedValue({
-      candidature: { candidatId: 10, offre: OFFRE },
+      candidature: { candidat: { userId: 70 }, offre: OFFRE },
     })
     userFindUnique.mockResolvedValue(null)
-    await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 10 })
+    await notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 70 })
     expect(emettre).not.toHaveBeenCalled()
   })
 })
@@ -246,16 +296,21 @@ describe('notifierOffrePubliee (chaque admin, lien public)', () => {
 
 // ─── offreIndisponible ──────────────────────────────────────────────────────
 
-describe('notifierOffreIndisponible (chaque candidat distinct)', () => {
-  it('notifie chaque candidat distinct, refId = offreId (regroupement clôture/suppression)', async () => {
+describe('notifierOffreIndisponible (chaque compte candidat distinct)', () => {
+  it('résout chaque Candidat.id → User.id, refId = offreId (regroupement clôture/suppression)', async () => {
     await notifierOffreIndisponible({ offreId: 3 })
 
-    // distinct candidatId dans la requête (un candidat = une notif par offre).
+    // distinct candidatId dans la requête (un candidat = une notif par offre),
+    // et jointure du COMPTE : Notification.userId attend User.id.
     expect(candidatureFindMany.mock.calls[0]?.[0]).toMatchObject({
       where: { offreId: 3 },
+      select: {
+        candidatId: true,
+        candidat: { select: { userId: true } },
+      },
       distinct: ['candidatId'],
     })
-    expect(emettre.mock.calls.map((appel) => appel[0]?.destinataireId)).toEqual([10, 11])
+    expect(emettre.mock.calls.map((appel) => appel[0]?.destinataireId)).toEqual([70, 71])
     for (const appel of emettre.mock.calls) {
       expect(appel[0]?.type).toBe('offreIndisponible')
       expect(appel[0]?.refId).toBe(3)
@@ -279,19 +334,30 @@ describe('échecs de lecture avalés (contrat no-throw des hooks)', () => {
     offreFindUnique.mockRejectedValue(new Error('réseau'))
     conversationFindUnique.mockRejectedValue(new Error('réseau'))
     userFindMany.mockRejectedValue(new Error('réseau'))
+    candidatureFindUnique.mockRejectedValue(new Error('réseau'))
 
     await expect(
       notifierCandidatureRecue({ candidatureId: 5, offreId: 3, candidatId: 10 }),
     ).resolves.toBeUndefined()
     await expect(
-      notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 10 }),
+      notifierStatutChange({
+        candidatureId: 5,
+        offreId: 3,
+        candidatId: 10,
+        ancienStatut: 'envoyee' as StatutCandidature,
+        nouveauStatut: 'acceptee' as StatutCandidature,
+        acteurId: 50,
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      notifierMessageEnvoye({ conversationId: 7, messageId: 9, emetteurId: 70 }),
     ).resolves.toBeUndefined()
     await expect(
       notifierSignalementRecu({ messageId: 9, auteurId: 10 }),
     ).resolves.toBeUndefined()
 
     expect(emettre).not.toHaveBeenCalled()
-    expect(console.error).toHaveBeenCalledTimes(3)
+    expect(console.error).toHaveBeenCalledTimes(4)
   })
 
   it('aucun trace en production', async () => {

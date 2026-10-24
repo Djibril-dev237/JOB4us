@@ -97,27 +97,33 @@ export async function notifierCandidatureRecue(
 
 /**
  * `statutChange` → notification au CANDIDAT (pas à l'acteur) : c'est sa
- * candidature qui bouge. Libellé du statut via `LIBELLES_STATUT` (source
- * unique M7, jamais une phrase fabriquée). `refId` = candidatureId : un
- * retour en arrière puis un nouveau changement regroupe sur la même ligne.
+ * candidature qui bouge. `evenement.candidatId` est un `Candidat.id` (profil),
+ * pas un `User.id` : la candidature est relue pour résoudre le COMPTE
+ * destinataire (`candidat.userId`) et le titre de l'offre. Libellé du statut
+ * via `LIBELLES_STATUT` (source unique M7, jamais une phrase fabriquée).
+ * `refId` = candidatureId : un retour en arrière puis un nouveau changement
+ * regroupe sur la même ligne.
  */
 export async function notifierStatutChange(
   evenement: EvenementStatutChange,
 ): Promise<void> {
   try {
-    const offre = await prisma.offre.findUnique({
-      where: { id: evenement.offreId },
-      select: { titre: true },
+    const candidature = await prisma.candidature.findUnique({
+      where: { id: evenement.candidatureId },
+      select: {
+        candidat: { select: { userId: true } },
+        offre: { select: { titre: true } },
+      },
     })
-    if (offre === null) return
+    if (candidature === null) return
     await emettreNotification({
-      destinataireId: evenement.candidatId,
+      destinataireId: candidature.candidat.userId,
       type: 'statutCandidature',
       refId: evenement.candidatureId,
       lien: `/candidat/candidatures/${evenement.candidatureId}`,
       variables: {
         type: 'statutCandidature',
-        titreOffre: offre.titre,
+        titreOffre: candidature.offre.titre,
         libelleStatut: LIBELLES_STATUT[evenement.nouveauStatut],
       },
     })
@@ -175,7 +181,7 @@ export async function notifierMessageEnvoye(
       select: {
         candidature: {
           select: {
-            candidatId: true,
+            candidat: { select: { userId: true } },
             offre: {
               select: {
                 titre: true,
@@ -193,11 +199,13 @@ export async function notifierMessageEnvoye(
     })
     if (emetteur === null) return
 
-    const { candidatId, offre } = conversation.candidature
+    // `candidature.candidatId` est un Candidat.id : le destinataire est le
+    // COMPTE du candidat (`candidat.userId`), jamais l'id de son profil.
+    const { candidat, offre } = conversation.candidature
     const destinataireId =
-      evenement.emetteurId === candidatId
+      evenement.emetteurId === candidat.userId
         ? offre.entreprise.userId
-        : candidatId
+        : candidat.userId
     if (!destinataireValide(destinataireId, evenement.emetteurId)) return
 
     await emettreNotification({
@@ -284,6 +292,9 @@ export async function notifierOffrePubliee(
  * sur la même ligne (l'upsert incrémente, jamais un doublon). La
  * suppression T10 est LOGIQUE (`deletedAt`) : la ligne survit, le titre
  * reste lisible.
+ *
+ * `candidature.candidatId` est un `Candidat.id` : le destinataire est le
+ * COMPTE (`candidat.userId`), jamais l'id du profil.
  */
 export async function notifierOffreIndisponible(
   evenement: EvenementOffre,
@@ -296,12 +307,15 @@ export async function notifierOffreIndisponible(
     if (offre === null) return
     const candidats = await prisma.candidature.findMany({
       where: { offreId: evenement.offreId },
-      select: { candidatId: true },
+      select: {
+        candidatId: true,
+        candidat: { select: { userId: true } },
+      },
       distinct: ['candidatId'],
     })
-    for (const { candidatId } of candidats) {
+    for (const { candidat } of candidats) {
       await emettreNotification({
-        destinataireId: candidatId,
+        destinataireId: candidat.userId,
         type: 'offreIndisponible',
         refId: evenement.offreId,
         lien: '/candidat/candidatures',

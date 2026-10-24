@@ -73,9 +73,11 @@ const OFFRES = [
 ]
 
 const CANDIDATURES = [
-  { offreId: 3, candidatId: 10 },
-  { offreId: 3, candidatId: 11 },
-  { offreId: 4, candidatId: 10 },
+  // Candidat.id (10/11) volontairement différents de User.id (70/71) :
+  // Notification.userId doit recevoir le COMPTE, pas le profil.
+  { offreId: 3, candidatId: 10, candidat: { userId: 70 } },
+  { offreId: 3, candidatId: 11, candidat: { userId: 71 } },
+  { offreId: 4, candidatId: 10, candidat: { userId: 70 } },
 ]
 
 beforeEach(() => {
@@ -123,28 +125,31 @@ describe('émission vers chaque candidat', () => {
 
     expect(candidatureFindMany).toHaveBeenCalledWith({
       where: { offreId: { in: [3, 4] } },
-      select: { offreId: true, candidatId: true },
+      select: {
+        offreId: true,
+        candidat: { select: { userId: true } },
+      },
       orderBy: [{ offreId: 'asc' }, { candidatId: 'asc' }],
     })
 
     expect(emettre).toHaveBeenCalledTimes(3)
     expect(emettre.mock.calls.map((appel) => appel[0])).toEqual([
       {
-        destinataireId: 10,
+        destinataireId: 70,
         type: 'offreIndisponible',
         refId: 3,
         lien: '/candidat/candidatures',
         variables: { type: 'offreIndisponible', titreOffre: 'Développeur' },
       },
       {
-        destinataireId: 11,
+        destinataireId: 71,
         type: 'offreIndisponible',
         refId: 3,
         lien: '/candidat/candidatures',
         variables: { type: 'offreIndisponible', titreOffre: 'Développeur' },
       },
       {
-        destinataireId: 10,
+        destinataireId: 70,
         type: 'offreIndisponible',
         refId: 4,
         lien: '/candidat/candidatures',
@@ -156,9 +161,9 @@ describe('émission vers chaque candidat', () => {
 
   it('une clé déjà présente est ignorée (rejeu = aucune réémission)', async () => {
     notificationFindMany.mockResolvedValue([
-      { cle: 'offreIndisponible:3:10' },
-      { cle: 'offreIndisponible:3:11' },
-      { cle: 'offreIndisponible:4:10' },
+      { cle: 'offreIndisponible:3:70' },
+      { cle: 'offreIndisponible:3:71' },
+      { cle: 'offreIndisponible:4:70' },
     ])
 
     const bilan = await notifierOffresExpirees(MAINTENANT)
@@ -166,9 +171,9 @@ describe('émission vers chaque candidat', () => {
     expect(notificationFindMany.mock.calls[0]?.[0]?.where).toEqual({
       cle: {
         in: [
-          'offreIndisponible:3:10',
-          'offreIndisponible:3:11',
-          'offreIndisponible:4:10',
+          'offreIndisponible:3:70',
+          'offreIndisponible:3:71',
+          'offreIndisponible:4:70',
         ],
       },
     })
@@ -177,13 +182,13 @@ describe('émission vers chaque candidat', () => {
   })
 
   it('émet uniquement pour les clés absentes', async () => {
-    notificationFindMany.mockResolvedValue([{ cle: 'offreIndisponible:3:11' }])
+    notificationFindMany.mockResolvedValue([{ cle: 'offreIndisponible:3:71' }])
 
     const bilan = await notifierOffresExpirees(MAINTENANT)
 
     expect(emettre.mock.calls.map((appel) => appel[0])).toMatchObject([
-      { destinataireId: 10, refId: 3 },
-      { destinataireId: 10, refId: 4 },
+      { destinataireId: 70, refId: 3 },
+      { destinataireId: 70, refId: 4 },
     ])
     expect(bilan).toEqual({ offres: 2, notifications: 2 })
   })
