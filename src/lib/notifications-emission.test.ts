@@ -263,3 +263,33 @@ describe('échecs avalés (contrat no-throw)', () => {
     vi.unstubAllEnvs()
   })
 })
+
+// ─── 5) Lien stocké : jamais un schéma exécutable ───────────────────────────
+
+describe('validation du lien in-app (défense en profondeur)', () => {
+  it('un `javascript:` est neutralisé en null dans create ET update', async () => {
+    await emettreNotification({ ...EMISSION, lien: 'javascript:alert(1)' })
+
+    expect(notificationUpsert.mock.calls[0]?.[0]?.create?.lien).toBeNull()
+    expect(notificationUpsert.mock.calls[0]?.[0]?.update?.lien).toBeNull()
+  })
+
+  it('une URL protocol-relative `//` est neutralisée', async () => {
+    await emettreNotification({ ...EMISSION, lien: '//exemple.test/phishing' })
+
+    expect(notificationUpsert.mock.calls[0]?.[0]?.create?.lien).toBeNull()
+  })
+
+  it('un antislash déguisé en sortie de site est neutralisé', async () => {
+    await emettreNotification({ ...EMISSION, lien: '/\\exemple.test' })
+
+    expect(notificationUpsert.mock.calls[0]?.[0]?.create?.lien).toBeNull()
+  })
+
+  it('un chemin interne valide reste intact', async () => {
+    await emettreNotification({ ...EMISSION, lien: '/notifications' })
+
+    expect(notificationUpsert.mock.calls[0]?.[0]?.create?.lien).toBe('/notifications')
+    expect(notificationUpsert.mock.calls[0]?.[0]?.update?.lien).toBe('/notifications')
+  })
+})

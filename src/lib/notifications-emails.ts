@@ -1,9 +1,10 @@
 // ─── Modèles d'emails transactionnels (M9, NOTIFICATIONS) ───────────────────
 //
-// RÔLE : fabriquer le triple (sujet, texte brut, HTML) des 3 emails du
-// module — notification simple, regroupement de messages, résumé quotidien.
-// Ce module ne fait AUCUN envoi : l'envoi (Resend) appartient à la Vague 3,
-// qui appellera UNIQUEMENT les 3 fonctions publiées ici.
+// RÔLE : fabriquer le triple (sujet, texte brut, HTML) des emails du module —
+// notification simple, regroupement de messages, résumé quotidien, et leur
+// variante d'envoi DIFFÉRÉ (notification déjà rendue en base). Ce module ne
+// fait AUCUN envoi : l'envoi (Resend, Vague 3) vit dans notifications-envoi.ts
+// et consomme uniquement les fonctions publiées ici.
 //
 // Contrats de style (validés Étapes 3 et 4) :
 //  * SOURCE UNIQUE DES TEXTES = src/lib/notifications-labels.ts : aucune
@@ -32,6 +33,7 @@ import {
   TEXTES,
   texteGroupeMessages,
   texteNotification,
+  type TypeNotification,
   type VariablesNouveauMessage,
   type VariablesNotification,
 } from '@/lib/notifications-labels'
@@ -217,4 +219,35 @@ export function construireEmailResumeQuotidien(
     ...blocsLignes,
   ]
   return composerEmail(TEXTES.sujetEmailResume, blocs, liens)
+}
+
+/**
+ * Email d'une notification DÉJÀ RENDUE, pour l'envoi DIFFÉRÉ de l'outbox
+ * (Vague 3). L'outbox ne stocke que `notificationId` : les variables fermées
+ * de `texteNotification` ne sont pas persistées. Or `titre`/`contenu` de la
+ * ligne `Notification` SONT la sortie de cette fabrique au moment de
+ * l'émission (y compris après regroupement, l'upsert les réactualise) : les
+ * recopier produit exactement le même artefact que `construireEmailNotification`
+ * ou `construireEmailGroupeMessages` — verrouillé par les tests d'équivalence.
+ *
+ * `compteur > 1` n'ajoute la ligne de regroupement que pour `nouveauMessage`
+ * (seul type dont le compteur a un sens métier) ; `contenu` peut être nul en
+ * base (colonne `String?`) et devient alors une chaîne vide.
+ */
+export function construireEmailNotificationRendue(
+  notification: {
+    type: TypeNotification
+    titre: string
+    contenu: string | null
+    compteur: number
+  },
+  liens: LiensEmail,
+): EmailConstruit {
+  const contenu = notification.contenu ?? ''
+  const bloc: BlocEmail =
+    notification.type === 'nouveauMessage' && notification.compteur > 1
+      ? { titre: texteGroupeMessages(notification.compteur), contenu }
+      : { titre: notification.titre, contenu }
+
+  return composerEmail(`${NOM_APPLICATION} : ${notification.titre}`, [bloc], liens)
 }

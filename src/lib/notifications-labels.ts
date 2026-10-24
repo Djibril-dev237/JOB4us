@@ -144,6 +144,19 @@ export function preferencesParDefaut(): Record<TypeNotification, boolean> {
   return defauts
 }
 
+/**
+ * Préférence email EFFECTIVE d'un type, source unique partagée par l'émission
+ * (empilement) et l'envoi différé (revérification) : un type non désactivable
+ * est TOUJOURS actif (modération), sinon la préférence stockée fait foi et
+ * l'absence de ligne retombe sur le défaut du catalogue. Le kill switch
+ * `emailsActives` reste décidé par l'appelant : il couvre aussi le digest, qui
+ * n'a pas de type.
+ */
+export function emailActif(type: TypeNotification, preference: boolean | null): boolean {
+  if (!METADONNEES[type].desactivable) return true
+  return preference ?? METADONNEES[type].emailParDefaut
+}
+
 // ─── Fabrique de titre/contenu (variables fermées) ───────────────────────────
 //
 // Union discriminée : chaque type n'accepte QUE ses variables. Aucun champ

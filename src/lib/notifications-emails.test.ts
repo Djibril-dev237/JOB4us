@@ -9,6 +9,7 @@ import {
 import {
   construireEmailGroupeMessages,
   construireEmailNotification,
+  construireEmailNotificationRendue,
   construireEmailResumeQuotidien,
   type LiensEmail,
 } from './notifications-emails'
@@ -248,5 +249,64 @@ describe('règles de design (émogrène, mentions d’outil)', () => {
         expect(email.html, `${nom} / html / ${interdit}`).not.toContain(interdit)
       }
     }
+  })
+})
+
+describe('construireEmailNotificationRendue (envoi différé de l’outbox)', () => {
+  it('équivaut EXACTEMENT à construireEmailNotification pour une notification simple', () => {
+    const variables = { type: 'candidatureRecue', titreOffre: 'Développeur' } as const
+    const { titre, contenu } = texteNotification(variables)
+    const attendu = construireEmailNotification(variables, LIENS)
+    const rendu = construireEmailNotificationRendue(
+      { type: 'candidatureRecue', titre, contenu, compteur: 1 },
+      LIENS,
+    )
+    expect(rendu).toEqual(attendu)
+  })
+
+  it('équivaut EXACTEMENT à construireEmailGroupeMessages pour un message regroupé', () => {
+    const variables = { type: 'nouveauMessage', acteur: 'Marie Dupont', compteur: 3 } as const
+    const { titre, contenu } = texteNotification(variables)
+    const attendu = construireEmailGroupeMessages(3, variables, LIENS)
+    const rendu = construireEmailNotificationRendue(
+      { type: 'nouveauMessage', titre, contenu, compteur: 3 },
+      LIENS,
+    )
+    expect(rendu).toEqual(attendu)
+  })
+
+  it('un compteur > 1 hors messagerie garde le titre de la notification', () => {
+    const variables = { type: 'candidatureRetiree', titreOffre: 'Développeur' } as const
+    const { titre, contenu } = texteNotification(variables)
+    const rendu = construireEmailNotificationRendue(
+      { type: 'candidatureRetiree', titre, contenu, compteur: 2 },
+      LIENS,
+    )
+    expect(rendu.texte).toContain(titre)
+    expect(rendu.texte).not.toContain(texteGroupeMessages(2))
+  })
+
+  it('un contenu nul (colonne String?) devient vide, sans jeter', () => {
+    const rendu = construireEmailNotificationRendue(
+      { type: 'signalementRecu', titre: 'Signalement reçu', contenu: null, compteur: 1 },
+      LIENS,
+    )
+    expect(rendu.sujet).toBe(`${NOM_APPLICATION} : Signalement reçu`)
+    expect(rendu.texte.length).toBeGreaterThan(0)
+    expect(rendu.html.length).toBeGreaterThan(0)
+  })
+
+  it('le contenu stocké est toujours échappé en HTML (défense XSS)', () => {
+    const rendu = construireEmailNotificationRendue(
+      {
+        type: 'candidatureRecue',
+        titre: 'Nouvelle candidature',
+        contenu: '<img src=x onerror=alert(1)>',
+        compteur: 1,
+      },
+      LIENS,
+    )
+    expect(rendu.html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(rendu.html).not.toContain('<img src=x')
   })
 })

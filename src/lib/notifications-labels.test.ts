@@ -5,6 +5,7 @@ import {
   TEXTES,
   TYPE_NOTIFICATIONS,
   TYPES_NON_DESACTIVABLES,
+  emailActif,
   preferencesParDefaut,
   texteGroupeMessages,
   texteNotification,
@@ -67,12 +68,30 @@ describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
 })
 
 describe('preferencesParDefaut (défauts dérivés du catalogue)', () => {
-  it('couvre les 8 types et reflète emailParDefaut', () => {
+  it('couvre les 9 types et reflète emailParDefaut', () => {
     const defauts = preferencesParDefaut()
     expect(Object.keys(defauts).sort()).toEqual([...TYPE_NOTIFICATIONS].sort())
     for (const type of TYPE_NOTIFICATIONS) {
       expect(defauts[type]).toBe(METADONNEES[type].emailParDefaut)
     }
+  })
+})
+
+describe('emailActif (règle unique émission + envoi différé)', () => {
+  it('un type non désactivable est TOUJOURS actif, même avec une préférence false', () => {
+    expect(emailActif('signalementRecu', false)).toBe(true)
+    expect(emailActif('signalementRecu', null)).toBe(true)
+  })
+
+  it('ligne absente = défaut du catalogue', () => {
+    for (const type of TYPE_NOTIFICATIONS) {
+      expect(emailActif(type, null)).toBe(METADONNEES[type].emailParDefaut)
+    }
+  })
+
+  it('la préférence stockée l’emporte dans les deux sens', () => {
+    expect(emailActif('offrePubliee', true)).toBe(true)
+    expect(emailActif('nouveauMessage', false)).toBe(false)
   })
 })
 

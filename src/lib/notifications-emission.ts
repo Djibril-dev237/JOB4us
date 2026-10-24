@@ -3,11 +3,12 @@ import 'server-only'
 import { prisma } from '@/lib/prisma'
 import {
   METADONNEES,
-  preferencesParDefaut,
+  emailActif,
   texteNotification,
   type TypeNotification,
   type VariablesNotification,
 } from '@/lib/notifications-labels'
+import { estLienInterne } from '@/lib/notifications-liens'
 
 // ─── Cœur d'émission des notifications (M9, Vague 2) ────────────────────────
 //
@@ -35,8 +36,8 @@ import {
 // échec DB (réseau, FK, contrainte) est AVALÉ et tracé en `console.error`
 // hors production. Les actions M5/M7/M8 ne voient JAMAIS leur verdict
 // retourné par une notification. L'outbox est DURABLE : un email n'est
-// jamais envoyé en ligne d'action, il est empilé en `enAttente` (le
-// ramassage et l'envoi Resend appartiennent à la Vague 3).
+// jamais envoyé en ligne d'action, il est empilé en `enAttente` puis drainé
+// par notifications-outbox.ts (Vague 3).
 //
 // PRÉFÉRENCES — l'absence de ligne vaut le défaut du code
 // (`preferencesParDefaut()`, jamais de seed). Un email n'est empilé QUE si
@@ -53,7 +54,11 @@ export interface EmissionNotification {
   type: TypeNotification
   /** Identifiant de la SOURCE MÈRE : la clé d'idempotence en dérive, sans temps. */
   refId: number
-  /** Lien in-app cible (relatif, construit par la branche émettrice). */
+  /**
+   * Lien in-app cible (relatif, construit par la branche émettrice). Toute
+   * valeur non interne (`javascript:`, `//`, antislash, contrôle…) est
+   * stockée `null` — défense en profondeur, jamais une erreur d'émission.
+   */
   lien: string
   /** Variables FERMÉES de la fabrique — jamais un champ libre de la base. */
   variables: VariablesNotification
@@ -76,6 +81,9 @@ export async function emettreNotification(
     const { destinataireId, type, refId, lien, variables } = emission
     const { titre, contenu } = texteNotification(variables)
     const cle = cleNotification(type, refId)
+    // Défense en profondeur : jamais de schéma exécutable ni de sortie de
+    // site dans un lien stocké (rendu en <Link> et repris dans les emails).
+    const lienSur = estLienInterne(lien) ? lien : null
 
     // Upsert idempotent : la course entre deux émetteurs simultanés se règle
     // PAR la base (contrainte unique sur `cle`), pas par un verrou
@@ -88,7 +96,7 @@ export async function emettreNotification(
         cle,
         titre,
         contenu,
-        lien,
+        lien: lienSur,
         compteur: 1,
         dernierRefId: refId,
       },
@@ -101,7 +109,7 @@ export async function emettreNotification(
         dernierRefId: refId,
         titre,
         contenu,
-        lien,
+        lien: lienSur,
         isLu: false,
         lueLe: null,
         archiveeLe: null,
@@ -197,7 +205,7 @@ async function emailAutorise(
     return false
   }
 
-  // Ligne explicite l'emporte sur le défaut ; sinon défaut du catalogue.
-  if (preference !== null) return preference.emailActive
-  return preferencesParDefaut()[type]
+  // Règle unique (labels) : type non désactivable toujours actif, sinon la
+  // ligne explicite l'emporte sur le défaut du catalogue.
+  return emailActif(type, preference?.emailActive ?? null)
 }
