@@ -5,6 +5,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { archiverLuees, purgerArchivees } from '@/lib/notifications-dal'
 import { estEnvoiConfigure } from '@/lib/notifications-envoi'
 import {
+  notifierOffresExpirees,
+  type BilanExpirations,
+} from '@/lib/notifications-expiration'
+import {
   preparerResumesQuotidiens,
   traiterFileEmails,
   type BilanFile,
@@ -14,13 +18,15 @@ import {
 // ─── GET /api/cron/notifications (M9, Vague 3) ──────────────────────────────
 //
 // POINT D'ENTRÉE UNIQUE des tâches planifiées du module, dans cet ordre :
-//  1. `preparerResumesQuotidiens` — crée les lignes de digest du jour (une par
+//  1. `notifierOffresExpirees` — crée les notifications des offres publiées
+//     devenues invisibles (l'expiration M6 est dérivée, sans événement) ;
+//  2. `preparerResumesQuotidiens` — crée les lignes de digest du jour (une par
 //     compte et par jour UTC, idempotent : les passages suivants n'ajoutent
 //     rien) ;
-//  2. `traiterFileEmails` — draine l'outbox (emails individuels ET digests),
+//  3. `traiterFileEmails` — draine l'outbox (emails individuels ET digests),
 //     par lots bornés, avec plafonds et reprises ;
-//  3. `archiverLuees` — lit > 30 jours → archiveeLe (M9, Vague 1) ;
-//  4. `purgerArchivees` — archiveeLe > 90 jours → suppression définitive.
+//  4. `archiverLuees` — lit > 30 jours → archiveeLe (M9, Vague 1) ;
+//  5. `purgerArchivees` — archiveeLe > 90 jours → suppression définitive.
 //
 // SÉCURITÉ : `CRON_SECRET` est OBLIGATOIRE. Sans secret configuré, la route
 // répond 503 (elle ne devient jamais publique par accident) ; avec un secret,
@@ -28,10 +34,10 @@ import {
 // CONSTANT. Aucune session : un planificateur externe n'a pas de cookie.
 //
 // OBSERVABILITÉ SANS PII : la réponse ne contient que des COMPTEURS et des
-// CODES de tâche en échec (`resumes`, `file`, `archives`, `purges`) — jamais
-// un identifiant de compte, une adresse, un sujet ou un corps d'erreur
-// fournisseur. Un échec d'une tâche n'empêche pas les suivantes : le cron
-// suivant rattrapera (toutes les tâches sont idempotentes).
+// CODES de tâche en échec (`expirations`, `resumes`, `file`, `archives`,
+// `purges`) — jamais un identifiant de compte, une adresse, un sujet ou un
+// corps d'erreur fournisseur. Un échec d'une tâche n'empêche pas les
+// suivantes : le cron suivant rattrapera (toutes les tâches sont idempotentes).
 //
 // DÉPLOIEMENT : aucun planificateur n'est imposé par le dépôt (pas de
 // vercel.json ni de cible Docker documentée). À appeler une fois par jour
@@ -60,6 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const erreurs: string[] = []
+  let expirations: BilanExpirations = { offres: 0, notifications: 0 }
   let resumes: BilanResumes = { candidats: 0, crees: 0 }
   let file: BilanFile = {
     configuration: estEnvoiConfigure() && Boolean(process.env.AUTH_SECRET?.trim()),
@@ -71,6 +78,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   let archives = 0
   let purges = 0
+
+  try {
+    expirations = await notifierOffresExpirees()
+  } catch {
+    erreurs.push('expirations')
+  }
 
   try {
     resumes = await preparerResumesQuotidiens()
@@ -99,6 +112,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const reponse = NextResponse.json({
     ok: true,
     configuration: file.configuration,
+    expirations,
     resumes,
     file,
     archives,

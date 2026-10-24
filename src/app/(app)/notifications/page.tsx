@@ -21,8 +21,8 @@ import { TEXTES } from '@/lib/notifications-labels'
 // (« Charger plus », curseur `[createdAt, id]`), les actions par carte et les
 // bandeaux vivent dans <ListeNotifications> (composant client).
 // Tous les textes affichés sortent de TEXTES (aucun libellé local) ; le lien
-// vers /notifications/preferences utilise `TEXTES.titrePreferences` (nav.ts ne
-// porte pas cette route : cf. rapport de Vague 2).
+// vers /notifications/preferences réutilise `TEXTES.titrePreferences`, la
+// même entrée que la navigation (nav.ts).
 // Rendu serveur async : règle du spike #98097 — aucun loading.tsx.
 // ---------------------------------------------------------------------------
 export const metadata: Metadata = {
@@ -41,7 +41,7 @@ export default async function PageNotifications() {
           {TEXTES.titreNotifications}
         </h1>
 
-        {/* Seule entrée de la page vers les préférences (nav.ts : absente). */}
+        {/* Raccourci de la page vers les préférences (également dans nav.ts). */}
         <Link
           href="/notifications/preferences"
           className={buttonClassName('secondary', 'sm', 'shrink-0')}

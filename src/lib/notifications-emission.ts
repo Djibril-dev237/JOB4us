@@ -19,17 +19,23 @@ import { estLienInterne } from '@/lib/notifications-liens'
 // par une action métier directement, jamais par un composant.
 //
 // IDEMPOTENCE (critère de module) — la `cle` est DÉTERMINISTE et ne porte
-// AUCUN temps : `type:refId`, où `refId` est l'identifiant de la SOURCE MÈRE
-// de l'événement (conversationId, candidatureId, offreId, couple
+// AUCUN temps : `type:ref:destinataire`, où `refId` est l'identifiant de la
+// SOURCE MÈRE de l'événement (conversationId, candidatureId, offreId, couple
 // inscription/admin…). Conséquences :
 //  * un événement REJOUÉ (double branche, retry, double clic, rejeu partiel)
 //    recalcule la MÊME clé → l'upsert incrémente `compteur` au lieu de
 //    dupliquer → rejeu = TOUJOURS une seule notification groupée ;
 //  * le regroupement (« 3 nouveaux messages ») est une conséquence de
 //    l'idempotence, pas une logique parallèle : UNE table, UN cycle de vie,
-//    UNE ligne par source, quel que soit le nombre d'événements.
+//    UNE ligne par source et par destinataire, quel que soit le nombre
+//    d'événements.
+// Le destinataire fait PARTIE de la clé : les événements multi-destinataires
+// (`offreIndisponible` vers chaque candidat, `offrePubliee` et
+// `signalementRecu` vers chaque admin) produisent une ligne PAR destinataire.
+// Sans lui, la contrainte globale sur `cle` ferait converger tous les
+// destinataires vers la ligne du premier (bug corrigé en Vague 3).
 // Chaque branche émettrice garantit l'unicité du couple (type, refId) pour
-// les événements ponctuels (ex. `systeme:inscription:{userId}:{adminId}`
+// un même destinataire (ex. `systeme:inscription:{userId}:{adminId}`
 // dans auth.ts : une inscription = une notification PAR admin).
 //
 // JAMAIS BLOQUANT (critère de module) — ce module ne LÈVE JAMAIS : tout
@@ -70,9 +76,9 @@ export interface ResultatEmission {
 }
 
 /**
- * Émet UNE notification in-app (idempotente par `type:refId`) et, si les
- * préférences l'autorisent, empile un email dans l'outbox. NE LÈVE JAMAIS :
- * un échec est avalé, tracé hors prod, et `null` est rendu.
+ * Émet UNE notification in-app (idempotente par `type:ref:destinataire`) et,
+ * si les préférences l'autorisent, empile un email dans l'outbox. NE LÈVE
+ * JAMAIS : un échec est avalé, tracé hors prod, et `null` est rendu.
  */
 export async function emettreNotification(
   emission: EmissionNotification,
@@ -80,7 +86,7 @@ export async function emettreNotification(
   try {
     const { destinataireId, type, refId, lien, variables } = emission
     const { titre, contenu } = texteNotification(variables)
-    const cle = cleNotification(type, refId)
+    const cle = cleNotification(type, refId, destinataireId)
     // Défense en profondeur : jamais de schéma exécutable ni de sortie de
     // site dans un lien stocké (rendu en <Link> et repris dans les emails).
     const lienSur = estLienInterne(lien) ? lien : null
@@ -132,12 +138,18 @@ export async function emettreNotification(
 }
 
 /**
- * Clé d'idempotence déterministe, SANS temps : `type:refId` tronquée à la
- * largeur de la colonne (200) — la troncature est sûre car `type` est du
- * catalogue (court) et `refId` un entier.
+ * Clé d'idempotence déterministe, SANS temps : `type:ref:destinataire`
+ * tronquée à la largeur de la colonne (200) — la troncature est sûre car
+ * `type` est du catalogue (court) et `refId`/`destinataireId` sont des
+ * entiers. Exportée pour la tâche d'expiration, qui doit vérifier l'absence
+ * de notification avant d'émettre.
  */
-function cleNotification(type: TypeNotification, refId: number): string {
-  return `${type}:${refId}`.slice(0, 200)
+export function cleNotification(
+  type: TypeNotification,
+  refId: number,
+  destinataireId: number,
+): string {
+  return `${type}:${refId}:${destinataireId}`.slice(0, 200)
 }
 
 /**
@@ -155,8 +167,12 @@ async function empilerEmailSiRegle(
     if (!(await emailAutorise(destinataireId, type))) return
 
     // MÊME clé que la notification, préfixée : l'unicité outbox suit
-    // l'unicité d'émission (un rejeu = un seul email en attente).
-    const cle = `email:${cleNotification(type, refId)}`.slice(0, 200)
+    // l'unicité d'émission (un rejeu = un seul email en attente, par
+    // destinataire).
+    const cle = `email:${cleNotification(type, refId, destinataireId)}`.slice(
+      0,
+      200,
+    )
 
     await prisma.emailNotification.upsert({
       where: { cle },

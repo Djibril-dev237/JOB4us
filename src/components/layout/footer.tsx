@@ -43,7 +43,9 @@ const FOOTER_NAVS: FooterNav[] = [
     links: [
       { label: 'Connexion', href: '/login' },
       { label: "Créer un compte", href: '/register' },
-      { label: 'Paramètres', href: '/parametres' },
+      // Pas d'entrée « Paramètres » : la route /parametres n'existe pas.
+      // Les préférences de notification vivent dans l'espace connecté
+      // (/notifications/preferences), pas dans le footer public.
     ],
   },
 ]

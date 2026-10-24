@@ -1,4 +1,5 @@
 import type { Role } from '@/lib/definitions'
+import { TEXTES } from '@/lib/notifications-labels'
 
 // ─── Navigation par rôle ─────────────────────────────────────────────────────
 // Source : sidebars legacy (layouts/partiel/sidebar-*.blade.php) et routes
@@ -33,19 +34,19 @@ export const NAV_SECONDARY: Record<Role, NavItem[]> = {
     { label: 'Mon profil', href: '/candidat/profil' },
     { label: 'Offres sauvegardées', href: '/candidat/offres/sauvegardees' },
     { label: 'Notifications', href: '/notifications' },
-    { label: 'Paramètres', href: '/parametres' },
+    { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
   ],
   recruteur: [
     { label: 'Mon entreprise', href: '/recruteur/entreprise' },
     { label: 'Messages', href: '/messages' },
     { label: 'Notifications', href: '/notifications' },
-    { label: 'Paramètres', href: '/parametres' },
+    { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
   ],
   admin: [
     { label: 'Catégories', href: '/admin/categories' },
     { label: 'Statistiques', href: '/admin/statistiques' },
     { label: 'Notifications', href: '/notifications' },
-    { label: 'Paramètres', href: '/parametres' },
+    { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
   ],
 }
 
@@ -84,7 +85,9 @@ export const SIDEBAR_NAV: Record<Role, SidebarSection[]> = {
     },
     {
       title: 'Compte',
-      items: [{ label: 'Paramètres', href: '/parametres' }],
+      items: [
+        { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
+      ],
     },
   ],
   recruteur: [
@@ -116,7 +119,9 @@ export const SIDEBAR_NAV: Record<Role, SidebarSection[]> = {
     },
     {
       title: 'Compte',
-      items: [{ label: 'Paramètres', href: '/parametres' }],
+      items: [
+        { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
+      ],
     },
   ],
   admin: [
@@ -146,7 +151,9 @@ export const SIDEBAR_NAV: Record<Role, SidebarSection[]> = {
     },
     {
       title: 'Compte',
-      items: [{ label: 'Paramètres', href: '/parametres' }],
+      items: [
+        { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
+      ],
     },
   ],
 }

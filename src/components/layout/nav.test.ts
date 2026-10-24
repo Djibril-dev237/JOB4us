@@ -49,6 +49,22 @@ describe('confidentialité — annuaire candidats retiré (M3-ST10)', () => {
   })
 })
 
+describe('accès aux préférences de notification (M9)', () => {
+  it('la navigation connectée pointe vers /notifications/preferences, jamais vers /parametres', () => {
+    expect(TOUS_LES_HREFS).not.toContain('/parametres')
+
+    for (const role of ROLES) {
+      const hrefs = [
+        ...NAV_SECONDARY[role].map((item) => item.href),
+        ...SIDEBAR_NAV[role].flatMap((section) =>
+          section.items.map((item) => item.href),
+        ),
+      ]
+      expect(hrefs).toContain('/notifications/preferences')
+    }
+  })
+})
+
 // ─── Accès aux offres publiques (M5) ─────────────────────────────────────────
 // La liste /offres (M5, task 2b) doit rester joignable depuis le chrome du
 // site : le visiteur découvre les offres par le header public, sans passer

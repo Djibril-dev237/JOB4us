@@ -6,8 +6,9 @@ import { emettreNotification, type EmissionNotification } from './notifications-
 
 // ─── Tests du cœur d'émission (M9, Vague 2) ─────────────────────────────────
 // Six critères verrouillés ici :
-// 1. IDEMPOTENCE : la clé est `type:refId` SANS temps — un rejeu recalcule
-//    la même clé, l'upsert incrémente au lieu de dupliquer (rejeu = 1 ligne) ;
+// 1. IDEMPOTENCE : la clé est `type:ref:destinataire` SANS temps — un rejeu
+//    recalcule la même clé, l'upsert incrémente au lieu de dupliquer
+//    (rejeu = 1 ligne PAR destinataire) ;
 // 2. REGROUPEMENT : la branche `update` incrémente `compteur`, met à jour le
 //    titre/contenu (le compteur vit dans les variables fermées) et RÉVEILLE
 //    la ligne (isLu/lueLe/archiveeLe remis à zéro) ;
@@ -16,7 +17,7 @@ import { emettreNotification, type EmissionNotification } from './notifications-
 // 4. JAMAIS BLOQUANT : un échec d'émission rend `null` sans lever ; un
 //    échec d'empilement email ne ruine PAS l'in-app ;
 // 5. OUTBOX : un email n'est empilé qu'avec la préférence effective vraie,
-//    avec la clé `email:type:refId` (un rejeu = un seul email) ;
+//    avec la clé `email:type:ref:destinataire` (un rejeu = un seul email) ;
 // 6. ZÉRO ÉCRITURE DE HORS-PRAGMA : seuls `notification` et
 //    `emailNotification` (+ 2 lectures de préférence) sont exposés au mock —
 //    toute autre requête lèverait une TypeError.
@@ -83,13 +84,13 @@ beforeEach(() => {
 
 // ─── 1) Idempotence : clé déterministe sans temps ───────────────────────────
 
-describe('idempotence (clé = type:refId, aucun temps)', () => {
-  it('émet avec la clé déterministe `type:refId` (aucune Date dans la clé)', async () => {
+describe('idempotence (clé = type:ref:destinataire, aucun temps)', () => {
+  it('émet avec la clé déterministe `type:ref:destinataire` (aucune Date dans la clé)', async () => {
     await emettreNotification(EMISSION)
 
     expect(notificationUpsert).toHaveBeenCalledTimes(1)
     const where = notificationUpsert.mock.calls[0]?.[0]?.where
-    expect(where).toEqual({ cle: 'nouveauMessage:42' })
+    expect(where).toEqual({ cle: 'nouveauMessage:42:7' })
     // La clé ne change jamais entre deux exécutions : pas de timestamp.
     expect(JSON.stringify(where)).not.toMatch(/\d{4}-\d{2}-\d{2}/)
   })
@@ -108,7 +109,7 @@ describe('idempotence (clé = type:refId, aucun temps)', () => {
     expect(notificationUpsert.mock.calls[0]?.[0]?.create).toEqual({
       userId: 7,
       type: 'nouveauMessage',
-      cle: 'nouveauMessage:42',
+      cle: 'nouveauMessage:42:7',
       titre: 'Nouveau message de Marie Dupont',
       contenu: 'Marie Dupont vous a envoyé un message.',
       lien: '/messages/42',
@@ -122,7 +123,15 @@ describe('idempotence (clé = type:refId, aucun temps)', () => {
     await emettreNotification({ ...EMISSION, refId: 44 })
 
     const cles = notificationUpsert.mock.calls.map((appel) => appel[0]?.where?.cle)
-    expect(cles).toEqual(['nouveauMessage:43', 'nouveauMessage:44'])
+    expect(cles).toEqual(['nouveauMessage:43:7', 'nouveauMessage:44:7'])
+  })
+
+  it('destinataire distinct = clé distincte (diffusion à plusieurs comptes)', async () => {
+    await emettreNotification({ ...EMISSION, destinataireId: 7 })
+    await emettreNotification({ ...EMISSION, destinataireId: 8 })
+
+    const cles = notificationUpsert.mock.calls.map((appel) => appel[0]?.where?.cle)
+    expect(cles).toEqual(['nouveauMessage:42:7', 'nouveauMessage:42:8'])
   })
 })
 
@@ -151,13 +160,13 @@ describe('regroupement (branche update : compteur + réveil)', () => {
 // ─── 3) Préférences et kill switch ──────────────────────────────────────────
 
 describe('préférences email (défaut + écart + kill switch)', () => {
-  it('défaut vrai + aucun écart → email empilé enAttente avec clé email:type:refId', async () => {
+  it('défaut vrai + aucun écart → email empilé enAttente avec clé email:type:ref:destinataire', async () => {
     // nouveauMessage : emailParDefaut = true, aucune ligne → empilé.
     await emettreNotification(EMISSION)
 
     expect(emailUpsert).toHaveBeenCalledTimes(1)
     expect(emailUpsert.mock.calls[0]?.[0]?.where).toEqual({
-      cle: 'email:nouveauMessage:42',
+      cle: 'email:nouveauMessage:42:7',
     })
     expect(emailUpsert.mock.calls[0]?.[0]?.create).toMatchObject({
       destinataireId: 7,
@@ -190,7 +199,7 @@ describe('préférences email (défaut + écart + kill switch)', () => {
 
     expect(emailUpsert).toHaveBeenCalledTimes(1)
     expect(emailUpsert.mock.calls[0]?.[0]?.where).toEqual({
-      cle: 'email:offrePubliee:9',
+      cle: 'email:offrePubliee:9:7',
     })
   })
 

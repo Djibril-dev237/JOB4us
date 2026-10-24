@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { BilanExpirations } from '@/lib/notifications-expiration'
 import type { BilanFile, BilanResumes } from '@/lib/notifications-outbox'
 
 import { GET } from './route'
@@ -9,12 +10,14 @@ import { GET } from './route'
 // Verrous :
 //  1. pas de CRON_SECRET → 503 sans exécuter AUCUNE tâche ;
 //  2. secret valide → 200 ; en-tête absent/faux → 401 (comparaison stricte) ;
-//  3. ordre digest → file → archivage → purge ;
+//  3. ordre expirations → digest → file → archivage → purge ;
 //  4. un échec de tâche est RAPPORTÉ par code, sans bloquer les suivantes ;
 //  5. réponse en compteurs uniquement (aucune PII), non cacheable.
 // ---------------------------------------------------------------------------
 
 const ORDRE: string[] = []
+
+const BILAN_EXPIRATIONS: BilanExpirations = { offres: 2, notifications: 4 }
 
 const BILAN_FILE: BilanFile = {
   configuration: true,
@@ -28,17 +31,23 @@ const BILAN_FILE: BilanFile = {
 const BILAN_RESUMES: BilanResumes = { candidats: 4, crees: 2 }
 
 const {
+  expirationsMock,
   preparerMock,
   traiterMock,
   archiverMock,
   purgerMock,
   configureMock,
 } = vi.hoisted(() => ({
+  expirationsMock: vi.fn<() => Promise<BilanExpirations>>(),
   preparerMock: vi.fn<() => Promise<BilanResumes>>(),
   traiterMock: vi.fn<() => Promise<BilanFile>>(),
   archiverMock: vi.fn<() => Promise<number>>(),
   purgerMock: vi.fn<() => Promise<number>>(),
   configureMock: vi.fn<() => boolean>(),
+}))
+
+vi.mock('@/lib/notifications-expiration', () => ({
+  notifierOffresExpirees: expirationsMock,
 }))
 
 vi.mock('@/lib/notifications-outbox', () => ({
@@ -70,6 +79,10 @@ beforeEach(() => {
   vi.stubEnv('CRON_SECRET', SECRET)
   vi.stubEnv('AUTH_SECRET', 'secret-auth-de-test')
 
+  expirationsMock.mockReset().mockImplementation(async () => {
+    ORDRE.push('expirations')
+    return BILAN_EXPIRATIONS
+  })
   preparerMock.mockReset().mockImplementation(async () => {
     ORDRE.push('resumes')
     return BILAN_RESUMES
@@ -127,16 +140,23 @@ describe('authentification du cron', () => {
 })
 
 describe('exécution des tâches', () => {
-  it('enchaîne résumés, file, archivage, purge et rend les compteurs', async () => {
+  it('enchaîne expirations, résumés, file, archivage, purge et rend les compteurs', async () => {
     const reponse = await GET(requete(`Bearer ${SECRET}`))
 
     expect(reponse.status).toBe(200)
-    expect(ORDRE).toEqual(['resumes', 'file', 'archives', 'purges'])
+    expect(ORDRE).toEqual([
+      'expirations',
+      'resumes',
+      'file',
+      'archives',
+      'purges',
+    ])
 
     const corps = await reponse.json()
     expect(corps).toEqual({
       ok: true,
       configuration: true,
+      expirations: BILAN_EXPIRATIONS,
       resumes: BILAN_RESUMES,
       file: BILAN_FILE,
       archives: 5,
@@ -145,18 +165,30 @@ describe('exécution des tâches', () => {
     })
   })
 
+  it('un échec d’expiration est rapporté SANS bloquer les autres tâches', async () => {
+    expirationsMock.mockRejectedValue(new Error('base indisponible'))
+
+    const reponse = await GET(requete(`Bearer ${SECRET}`))
+
+    expect(reponse.status).toBe(200)
+    expect(ORDRE).toEqual(['resumes', 'file', 'archives', 'purges'])
+    const corps = (await reponse.json()) as { erreurs: string[] }
+    expect(corps.erreurs).toEqual(['expirations'])
+  })
+
   it('un échec de digest est rapporté SANS bloquer les autres tâches', async () => {
     preparerMock.mockRejectedValue(new Error('base indisponible'))
 
     const reponse = await GET(requete(`Bearer ${SECRET}`))
 
     expect(reponse.status).toBe(200)
-    expect(ORDRE).toEqual(['file', 'archives', 'purges'])
+    expect(ORDRE).toEqual(['expirations', 'file', 'archives', 'purges'])
     const corps = (await reponse.json()) as { erreurs: string[] }
     expect(corps.erreurs).toEqual(['resumes'])
   })
 
   it('tous les échecs sont réduits à des CODES, aucune PII dans la réponse', async () => {
+    expirationsMock.mockRejectedValue(new Error('destinataire@exemple.test'))
     preparerMock.mockRejectedValue(new Error('destinataire@exemple.test'))
     traiterMock.mockRejectedValue(new Error('destinataire@exemple.test'))
     archiverMock.mockRejectedValue(new Error('destinataire@exemple.test'))
@@ -166,6 +198,7 @@ describe('exécution des tâches', () => {
     const texte = JSON.stringify(await reponse.json())
 
     expect(texte).not.toContain('@')
+    expect(texte).toContain('expirations')
     expect(texte).toContain('resumes')
     expect(texte).toContain('file')
     expect(texte).toContain('archives')

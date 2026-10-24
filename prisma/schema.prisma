@@ -299,7 +299,9 @@ enum TypeContrat {
 // Cycle de vie d'une offre (M6 étape 2) : les transitions autorisées sont
 // vérifiées côté serveur (compare-and-set) — « expirée » et « supprimée »
 // ne sont PAS des statuts : la première est dérivée de dateExpiration à
-// chaque lecture (aucun cron), la seconde vit dans deletedAt.
+// chaque lecture (aucun cron de statut), la seconde vit dans deletedAt.
+// M9 notifie les candidats des offres expirées via son propre cron de
+// notifications : il lit ces deux champs sans écrire de statut.
 enum StatutOffre {
   brouillon
   publiee

@@ -113,6 +113,10 @@ export const METADONNEES: Record<TypeNotification, MetadonneesType> = {
     emailParDefaut: false,
     desactivable: true,
   },
+  // Aucun émetteur M4-M8 : aucune fonctionnalité de certification n'existe
+  // dans le code migré (anomalie documentée au compte-rendu M9). Le type reste
+  // au catalogue pour que le parcours admin puisse le brancher sans changer
+  // l'enum Prisma.
   entrepriseCertifiee: {
     libelle: 'Entreprise certifiée',
     description: 'Voir les certifications d’entreprise.',
