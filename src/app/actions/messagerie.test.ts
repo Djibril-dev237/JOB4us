@@ -46,7 +46,8 @@ import {
 // — aucun verdict différencié, aucun oracle.
 //
 // Patron repris de candidatures.securite.test.ts : prisma/dal mockés, hooks
-// d'événements spyés (no-op réel), Zod et nettoyage tournant POUR DE VRAI.
+// d'événements spyés (implémentation réelle branchée M9, résolveurs
+// stubbés), Zod et nettoyage tournant POUR DE VRAI.
 // DIFFÉRENCE assumée : le SEAU EST RÉEL (en mémoire) — seuls
 // `checkRateLimit`/`recordAttempt` sont spyés « call-through », pour prouver
 // à la fois le comportement (10 envois puis refus) et l'absence de
@@ -215,8 +216,8 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => {
   }
 })
 
-// Spies exécutant les no-ops réels (M9) : « appelé une fois avec les ids »
-// est vérifiable, et aucun verdict ne peut en dépendre.
+// Spies exécutant les hooks réels (branchés M9) : « appelé une fois avec
+// les ids » est vérifiable, et aucun verdict ne peut en dépendre.
 vi.mock('@/lib/evenements-messagerie', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/evenements-messagerie')>()
   return {
@@ -226,6 +227,14 @@ vi.mock('@/lib/evenements-messagerie', async (importOriginal) => {
     signalementRecu: vi.fn(original.signalementRecu),
   }
 })
+
+// Résolveurs M9 stubbés : les hooks réels ci-dessus leur délèguent en
+// fire-and-forget — le seau et les verdicts d'envoi sont seuls jugeables
+// ici (couplage hook → résolveur verrouillé dans evenements-messagerie.test.ts).
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierMessageEnvoye: vi.fn(async () => undefined),
+  notifierSignalementRecu: vi.fn(async () => undefined),
+}))
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -665,8 +674,8 @@ describe('signalerMessage — signalement valide', () => {
     // L'identité du signalant sort de la SESSION, jamais du payload.
     expect(resultat).toEqual({ ok: true, deja: false })
 
-    // Événement M9 (no-op) : émis UNE fois sur création réelle, pointeurs
-    // seuls — jamais le motif.
+    // Événement M9 (signalementRecu, branché) : émis UNE fois sur création
+    // réelle, pointeurs seuls — jamais le motif (résolveur stubbé ici).
     expect(signalementRecu).toHaveBeenCalledTimes(1)
     expect(signalementRecu).toHaveBeenCalledWith({ messageId: MESSAGE_ID, auteurId: USER_ID })
 

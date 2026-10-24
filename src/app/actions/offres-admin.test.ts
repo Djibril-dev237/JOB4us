@@ -46,8 +46,8 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-// Spy exécutant le no-op réel (M9) : « appelé une fois avec l'id » est
-// vérifiable, et aucun verdict ne peut en dépendre.
+// Spy exécutant les hooks réels (branchés M9) : « appelé une fois avec
+// l'id » est vérifiable, et aucun verdict ne peut en dépendre.
 vi.mock('@/lib/evenements-offres', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/evenements-offres')>()
   return {
@@ -55,6 +55,13 @@ vi.mock('@/lib/evenements-offres', async (importOriginal) => {
     offreIndisponible: vi.fn(original.offreIndisponible),
   }
 })
+
+// Résolveurs M9 stubbés : les hooks réels ci-dessus leur délèguent en
+// fire-and-forget — la matrice T8 seule décide des verdicts admin.
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierOffrePubliee: vi.fn(async () => undefined),
+  notifierOffreIndisponible: vi.fn(async () => undefined),
+}))
 
 // Dans Next, redirect() et notFound() sont des exceptions de contrôle :
 // les mocks lèvent aussi, sinon l'exécution continuerait après le verdict
@@ -106,7 +113,7 @@ describe('suspendreOffre (T8)', () => {
     })
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?maj=suspendue')
-    // Événement M9 (no-op) : la suspension retire l'offre de la visibilité.
+    // Événement M9 (hook branché, résolveur stubbé ici) : la suspension retire l'offre de la visibilité.
     expect(offreIndisponible).toHaveBeenCalledTimes(1)
     expect(offreIndisponible).toHaveBeenCalledWith({ offreId: 42 })
   })

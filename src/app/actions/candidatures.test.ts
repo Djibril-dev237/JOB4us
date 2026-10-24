@@ -105,9 +105,9 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => {
   return { ...original, checkRateLimit: vi.fn(), recordAttempt: vi.fn() }
 })
 
-// Spies qui EXÉCUTENT le hook réel (no-op) : les assertions d'émission des
-// actions restent possibles, et le test « les 3 s'exécutent sans erreur »
-// porte sur la VRAIE implémentation, pas sur un stub vide.
+// Spies qui EXÉCUTENT le hook réel (branché M8/M9) : les assertions
+// d'émission des actions restent possibles, et le test « les 3 s'exécutent
+// sans erreur » porte sur la VRAIE implémentation, pas sur un stub vide.
 vi.mock('@/lib/evenements-candidature', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/evenements-candidature')>()
   return {
@@ -116,6 +116,16 @@ vi.mock('@/lib/evenements-candidature', async (importOriginal) => {
     statutChange: vi.fn(original.statutChange),
   }
 })
+
+// Résolveurs M9 stubbés : les hooks réels ci-dessus leur délèguent en
+// fire-and-forget — aucun verdict d'action ne peut en dépendre. Le couple
+// hook → résolveur est verrouillé dans evenements-candidature.test.ts, la
+// logique de résolution dans notifications-evenements.test.ts.
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierCandidatureRecue: vi.fn(async () => undefined),
+  notifierCandidatureRetiree: vi.fn(async () => undefined),
+  notifierStatutChange: vi.fn(async () => undefined),
+}))
 
 // redirect() et notFound() lèvent en production : les mocks font pareil, sinon
 // l'action continuerait après son verdict et les assertions de « pas d'écriture
@@ -799,7 +809,7 @@ describe('marquerConsultee', () => {
 // ─── Hooks d'événements (M8 / M9) ────────────────────────────────────────────
 
 describe("hooks d'événements", () => {
-  it('les 3 hooks s’exécutent sans erreur (no-op verrouillé avant branchement M8/M9)', () => {
+  it('les 3 hooks s’exécutent sans erreur (branchements M8/M9, résolveurs stubbés)', () => {
     const base = { candidatureId: 1, offreId: 2, candidatId: 3 }
 
     expect(() => candidatureEnvoyee(base)).not.toThrow()
@@ -814,7 +824,7 @@ describe("hooks d'événements", () => {
     ).not.toThrow()
   })
 
-  it("aucun lien entre les hooks M8/M9 et l’audit : ils restent sans effet", () => {
+  it("aucun lien entre les hooks M8/M9 et l’audit : jamais de ligne d’audit depuis un événement", () => {
     const base = { candidatureId: CANDIDATURE_ID, offreId: OFFRE_ID, candidatId: CANDIDAT_ID }
 
     candidatureEnvoyee(base)

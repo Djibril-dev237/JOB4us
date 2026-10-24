@@ -356,7 +356,7 @@ export async function publierOffre(formData: FormData): Promise<void> {
     redirect('/recruteur/offres?erreur=statut')
   }
 
-  // Événement M9 (no-op aujourd'hui) : la publication rend l'offre VISIBLE,
+  // Événement M9 (hook branché) : la publication rend l'offre VISIBLE,
   // c'est le seul moment où les admins doivent être prévenus (jamais à la
   // réouverture T5 ni à la levée T9 : la cible est alors un brouillon).
   offrePubliee({ offreId: id })
@@ -373,9 +373,9 @@ export async function publierOffre(formData: FormData): Promise<void> {
  * (fermer est toujours sur) et T5 ne rouvre qu'une clôturée.
  *
  * `apresSucces` (optionnel) s'exécute APRÈS le CAS réussi et AVANT la
- * redirection : c'est le point de branchement M9 des hooks d'événements,
- * appelé exactement quand la transition a réellement eu lieu (jamais sur
- * un refus, jamais deux fois pour un double clic — le CAS est maître).
+ * redirection : c'est le point d'appel des hooks d'événements (branchements
+ * M8/M9), appelé exactement quand la transition a réellement eu lieu (jamais
+ * sur un refus, jamais deux fois pour un double clic — le CAS est maître).
  */
 async function executerTransitionStatut(
   formData: FormData,
@@ -412,7 +412,7 @@ async function executerTransitionStatut(
 /** T4 : publiée (y compris expirée) → clôturée. */
 export async function cloturerOffre(formData: FormData): Promise<void> {
   await executerTransitionStatut(formData, 'publiee', 'cloturee', 'cloturee', (offreId) => {
-    // Événement M9 (no-op aujourd'hui) : la clôture retire l'offre de la
+    // Événement M9 (hook branché) : la clôture retire l'offre de la
     // visibilité — les candidats concernés seront prévenus. Le CAS ci-dessus
     // a déjà prouvé que la transition a eu lieu ; le rejeu d'une clôture
     // (déjà clôturée) ne repart jamais (count 0 → refus, hook non appelé).
@@ -532,7 +532,7 @@ export async function supprimerOffre(formData: FormData): Promise<void> {
     redirect('/recruteur/offres?erreur=statut')
   }
 
-  // Événement M9 (no-op aujourd'hui) : la suppression logique retire
+  // Événement M9 (hook branché) : la suppression logique retire
   // l'offre de la visibilité — même famille que clôture/suspension.
   offreIndisponible({ offreId: id })
 

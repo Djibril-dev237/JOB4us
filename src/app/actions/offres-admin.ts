@@ -73,7 +73,7 @@ export async function suspendreOffre(formData: FormData): Promise<void> {
     redirect('/admin/offres?erreur=statut')
   }
 
-  // Événement M9 (no-op aujourd'hui) : la suspension retire l'offre de la
+  // Événement M9 (hook branché) : la suspension retire l'offre de la
   // visibilité — les candidats concernés seront prévenus (la levée T9,
   // cible brouillon, n'émet rien : rien n'est de nouveau visible).
   offreIndisponible({ offreId: id })

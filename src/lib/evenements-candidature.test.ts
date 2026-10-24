@@ -5,17 +5,24 @@ import {
   candidatureRetiree,
   statutChange,
   type EvenementCandidature,
+  type EvenementStatutChange,
 } from '@/lib/evenements-candidature'
 import { conversationCreee } from '@/lib/evenements-messagerie'
+import {
+  notifierCandidatureRecue,
+  notifierCandidatureRetiree,
+  notifierStatutChange,
+} from '@/lib/notifications-evenements'
 import { creerConversationDepuisCandidature } from '@/lib/messagerie-creation'
 
-// ─── Branchement M8 dans `candidatureEnvoyee` (Vague 2) ──────────────────────
+// ─── Branchements M8 + M9 dans les hooks de candidature (Vague 2) ───────────
 //
 // Verrou du POINT DE BRANCHEMENT : la conversation-cadre doit naître au
-// moment exact de l'envoi, l'événement M9 doit ne partir qu'une fois par
-// création réelle, et surtout le CONTRAT du module (jamais d'exception,
-// jamais de log) doit survivre à un échec de base — les actions M7 ne
-// peuvent pas voir leur verdict modifié par un événement.
+// moment exact de l'envoi (M8), la notification « Nouvelle candidature »
+// doit partir INDEPENDAMMENT du succès de cette conversation (arbitrage M9),
+// et surtout le CONTRAT du module (jamais d'exception, jamais de log) doit
+// survivre à un échec de base — les actions M7 ne peuvent pas voir leur
+// verdict modifié par un événement.
 // ---------------------------------------------------------------------------
 
 vi.mock('@/lib/messagerie-creation', () => ({
@@ -23,6 +30,11 @@ vi.mock('@/lib/messagerie-creation', () => ({
 }))
 vi.mock('@/lib/evenements-messagerie', () => ({
   conversationCreee: vi.fn(),
+}))
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierCandidatureRecue: vi.fn(async () => undefined),
+  notifierCandidatureRetiree: vi.fn(async () => undefined),
+  notifierStatutChange: vi.fn(async () => undefined),
 }))
 
 const EVENEMENT: EvenementCandidature = {
@@ -38,13 +50,16 @@ async function laisserTourner(): Promise<void> {
 
 const creer = vi.mocked(creerConversationDepuisCandidature)
 const notifiee = vi.mocked(conversationCreee)
+const recue = vi.mocked(notifierCandidatureRecue)
+const retiree = vi.mocked(notifierCandidatureRetiree)
+const statut = vi.mocked(notifierStatutChange)
 
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('candidatureEnvoyee — branchement M8', () => {
-  it('crée la conversation depuis la candidature et émet conversationCreee une fois', async () => {
+describe('candidatureEnvoyee — branchements M8 + M9', () => {
+  it('crée la conversation, émet conversationCreee, et notifie le recruteur UNE fois', async () => {
     creer.mockResolvedValue(7)
 
     candidatureEnvoyee(EVENEMENT)
@@ -54,14 +69,19 @@ describe('candidatureEnvoyee — branchement M8', () => {
     expect(creer).toHaveBeenCalledWith(21)
     expect(notifiee).toHaveBeenCalledTimes(1)
     expect(notifiee).toHaveBeenCalledWith({ conversationId: 7, candidatureId: 21 })
+    expect(recue).toHaveBeenCalledTimes(1)
+    expect(recue).toHaveBeenCalledWith(EVENEMENT)
   })
 
-  it("candidature absente (null) : pas d'événement, pas d'exception", async () => {
+  it('ARBITRAGE M9 : la notification recruteur part MÊME si la conversation échoue (null)', async () => {
+    // « Un candidat a postulé » reste vrai sans conversation : lier la
+    // notification au succès de la messagerie serait un couplage fautif.
     creer.mockResolvedValue(null)
 
     candidatureEnvoyee(EVENEMENT)
     await laisserTourner()
 
+    expect(recue).toHaveBeenCalledTimes(1)
     expect(notifiee).not.toHaveBeenCalled()
   })
 
@@ -74,20 +94,31 @@ describe('candidatureEnvoyee — branchement M8', () => {
     await laisserTourner()
 
     expect(notifiee).not.toHaveBeenCalled()
+    // La notification recruteur est indépendante : elle part quand même.
+    expect(recue).toHaveBeenCalledTimes(1)
   })
 })
 
-describe('les autres hooks restent no-op (M9, non branchés)', () => {
-  it('candidatureRetiree et statutChange ne touchent ni la création ni les événements', async () => {
-    candidatureRetiree(EVENEMENT)
-    statutChange({
+describe('hooks statutChange / candidatureRetiree — branchement M9', () => {
+  it('statutChange délègue le payload EXACT au résolveur (candidat notifié)', () => {
+    const evenementStatut: EvenementStatutChange = {
       ...EVENEMENT,
       ancienStatut: 'envoyee',
       nouveauStatut: 'consultee',
       acteurId: 3,
-    })
-    await laisserTourner()
+    }
+    expect(statutChange(evenementStatut)).toBeUndefined()
 
+    expect(statut).toHaveBeenCalledTimes(1)
+    expect(statut).toHaveBeenCalledWith(evenementStatut)
+    expect(creer).not.toHaveBeenCalled()
+  })
+
+  it('candidatureRetiree délègue le payload EXACT au résolveur (recruteur notifié)', () => {
+    expect(candidatureRetiree(EVENEMENT)).toBeUndefined()
+
+    expect(retiree).toHaveBeenCalledTimes(1)
+    expect(retiree).toHaveBeenCalledWith(EVENEMENT)
     expect(creer).not.toHaveBeenCalled()
     expect(notifiee).not.toHaveBeenCalled()
   })

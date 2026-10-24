@@ -202,8 +202,8 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => {
   return { ...original, checkRateLimit: vi.fn(), recordAttempt: vi.fn() }
 })
 
-// Spies exécutant le hook réel (no-op) : les verdicts ne peuvent pas en
-// dépendre, et « les 3 restent sans effet » reste vérifiable.
+// Spies exécutant le hook réel (branché M8/M9) : les verdicts ne peuvent
+// pas en dépendre, et « jamais d'effet sur l'audit » reste vérifiable.
 vi.mock('@/lib/evenements-candidature', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/evenements-candidature')>()
   return {
@@ -212,6 +212,14 @@ vi.mock('@/lib/evenements-candidature', async (importOriginal) => {
     statutChange: vi.fn(original.statutChange),
   }
 })
+
+// Résolveurs M9 stubbés : les hooks réels ci-dessus leur délèguent en
+// fire-and-forget — la matrice de transitions est seule juge des verdicts.
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierCandidatureRecue: vi.fn(async () => undefined),
+  notifierCandidatureRetiree: vi.fn(async () => undefined),
+  notifierStatutChange: vi.fn(async () => undefined),
+}))
 
 // redirect() et notFound() lèvent en production : les mocks font pareil,
 // sinon l'action continuerait après son verdict.

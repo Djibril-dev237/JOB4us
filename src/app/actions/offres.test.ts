@@ -85,8 +85,8 @@ vi.mock('@/lib/offres-dal', () => ({
   lireOffreModifiable: vi.fn(),
 }))
 
-// Spies exécutant les no-ops réels (M9) : « appelé une fois avec l'id »
-// est vérifiable, et aucun verdict ne peut en dépendre.
+// Spies exécutant les hooks réels (branchés M9) : « appelé une fois avec
+// l'id » est vérifiable, et aucun verdict ne peut en dépendre.
 vi.mock('@/lib/evenements-offres', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/evenements-offres')>()
   return {
@@ -94,6 +94,13 @@ vi.mock('@/lib/evenements-offres', async (importOriginal) => {
     offreIndisponible: vi.fn(original.offreIndisponible),
   }
 })
+
+// Résolveurs M9 stubbés : les hooks réels ci-dessus leur délèguent en
+// fire-and-forget — le CAS de l'action reste seul maître du verdict.
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierOffrePubliee: vi.fn(async () => undefined),
+  notifierOffreIndisponible: vi.fn(async () => undefined),
+}))
 
 // Le seau D6 est mocké (contrôle de sa valeur et de sa fenêtre) MAIS les
 // constantes de politique sont celles du module réel : un écart de fenêtre
@@ -622,7 +629,7 @@ describe('publierOffre', () => {
     expect(offreCount).toHaveBeenCalledWith({
       where: { entrepriseId: ENTREPRISE_ID, statut: 'publiee', deletedAt: null },
     })
-    // Événement M9 (no-op) : émis UNE fois, après CAS réussi, avec l'id lu.
+    // Événement M9 (hook branché, résolveur stubbé ici) : émis UNE fois, après CAS réussi, avec l'id lu.
     expect(offrePubliee).toHaveBeenCalledTimes(1)
     expect(offrePubliee).toHaveBeenCalledWith({ offreId: OFFRE_ID })
     expect(offreIndisponible).not.toHaveBeenCalled()
@@ -687,7 +694,7 @@ describe('cloturerOffre', () => {
       where: { id: OFFRE_ID, entrepriseId: ENTREPRISE_ID, statut: 'publiee', deletedAt: null },
       data: { statut: 'cloturee' },
     })
-    // Événement M9 (no-op) : la clôture retire l'offre de la visibilité.
+    // Événement M9 (hook branché, résolveur stubbé ici) : la clôture retire l'offre de la visibilité.
     expect(offreIndisponible).toHaveBeenCalledTimes(1)
     expect(offreIndisponible).toHaveBeenCalledWith({ offreId: OFFRE_ID })
     expect(offrePubliee).not.toHaveBeenCalled()
@@ -839,7 +846,7 @@ describe('supprimerOffre', () => {
     // Jamais de suppression physique : updateMany est la seule écriture.
     expect(offreCreate).not.toHaveBeenCalled()
     expect(offreUpdate).not.toHaveBeenCalled()
-    // Événement M9 (no-op) : la suppression logique retire l'offre de la
+    // Événement M9 (hook branché, résolveur stubbé ici) : la suppression logique retire l'offre de la
     // visibilité, même famille que clôture et suspension.
     expect(offreIndisponible).toHaveBeenCalledTimes(1)
     expect(offreIndisponible).toHaveBeenCalledWith({ offreId: OFFRE_ID })

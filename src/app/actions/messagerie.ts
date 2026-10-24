@@ -79,12 +79,13 @@ import {
 //   * `signalerMessage` : session → schema → nettoyage du motif →
 //     `ecrireSignalement` (le DAL porte les 3 contrôles d'existence dans UNE
 //     requête) → verdict. AUCUN seau (l'Étape 2 ne l'impose que pour l'envoi
-//     de messages) et AUCUN hook M9 (pas d'événement de signalement au
-//     catalogue) — un signalement ne notifie personne, il alimente la file
-//     de modération. Surtout, JAMAIS testé contre le blocage : signaler est
-//     la soupape de sécurité des harcèlements, elle doit rester ouverte même
-//     quand l'interlocuteur m'a bloqué (sinon le blocage couvrirait
-//     exactement les cas où la modération doit être saisie).
+//     de messages) et un seul hook M9 (`signalementRecu`, branché vers son
+//     résolveur) : le signalement notifie les admins en interne (pointeurs
+//     seuls, jamais le motif) et alimente la file de modération. Surtout,
+//     JAMAIS testé contre le blocage : signaler est la soupape de sécurité
+//     des harcèlements, elle doit rester ouverte même quand l'interlocuteur
+//     m'a bloqué (sinon le blocage couvrirait exactement les cas où la
+//     modération doit être saisie).
 //   * `bloquerUtilisateur` / `debloquerUtilisateur` : session → schema →
 //     PAS d'auto-blocage (la cible = moi est un refus, jamais une écriture)
 //     → DAL idempotent. Le blocage est GLOBAL par acteurs : il n'a pas besoin
@@ -407,7 +408,7 @@ export async function signalerMessage(payload: {
       return { ok: false, erreur: 'inconnue' }
     }
     if (verdict === 'cree') {
-      // Événement M9 (no-op aujourd'hui) : pointeurs seuls — le motif
+      // Événement M9 (hook branché) : pointeurs seuls — le motif
       // nettoyé et l'identité du signalant ne quittent jamais cette requête.
       signalementRecu({ messageId: parse.data.messageId, auteurId: session.userId })
     }

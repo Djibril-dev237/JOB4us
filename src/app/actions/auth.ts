@@ -206,7 +206,10 @@ export async function register(
             type: 'systeme',
             cle: `systeme:inscription:${user.id}:${admin.id}`,
             ...texteNotification({ type: 'systeme', acteur: data.name, role }),
-            lien: '/admin/utilisateurs',
+            // Lien vers UNE page existante : /admin/utilisateurs n'existe pas
+            // dans l'app Next (page legacy M4 absente) — le tableau de bord
+            // admin est le point d'entrée des comptes.
+            lien: '/admin/dashboard',
           })),
           skipDuplicates: true,
         })

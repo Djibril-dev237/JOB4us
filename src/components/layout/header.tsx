@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
+import { TEXTES as TEXTES_NOTIFICATIONS } from '@/lib/notifications-labels'
 import { IconBell } from '@/components/icons'
 import { AvatarMenu } from './avatar-menu'
 import { Logo } from './logo'
@@ -71,7 +72,16 @@ export async function Header() {
                 className="relative flex size-11 items-center justify-center rounded-sm text-ink-muted transition-colors duration-fast hover:bg-surface-alt hover:text-ink sm:size-9"
               >
                 <span className="sr-only">
-                  Notifications{unread > 0 ? `, ${unread} non lues` : ''}
+                  {/* Aucun texte en dur (M9) : nom et pluriel sortent de
+                      TEXTES (source unique notifications-labels). */}
+                  {TEXTES_NOTIFICATIONS.titreNotifications}
+                  {unread > 0
+                    ? `, ${unread} ${
+                        unread === 1
+                          ? TEXTES_NOTIFICATIONS.nonLue
+                          : TEXTES_NOTIFICATIONS.nonLues
+                      }`
+                    : ''}
                 </span>
                 <IconBell size={18} />
                 {unread > 0 && (

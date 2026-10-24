@@ -94,7 +94,8 @@ const { conversationFindFirst, messageCreate, blocageFindFirst } = vi.hoisted(()
 // PÉRIMÈTRE EXACT : seuls conversation/message/blocage existent dans ce
 // double. Toute écriture de notification (V12) ou `conversation.touch()`
 // legacy lèverait une TypeError et casserait le test — la preuve est par
-// l'absence, pas par un spy.
+// l'absence, pas par un spy. (Le résolveur M9 est stubbé plus bas : c'est
+// l'ACTION qu'on éprouve ici, pas la couche notification.)
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     conversation: { findFirst: conversationFindFirst },
@@ -120,6 +121,14 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => {
     recordAttempt: vi.fn((key: string, windowMs?: number) => original.recordAttempt(key, windowMs)),
   }
 })
+
+// Résolveurs M9 stubbés : les hooks réels (non mockés ici) leur délèguent
+// en fire-and-forget — les événements partent, mais AUCUNE écriture de
+// notification n'atteint jamais le client restreint ci-dessus.
+vi.mock('@/lib/notifications-evenements', () => ({
+  notifierMessageEnvoye: vi.fn(async () => undefined),
+  notifierSignalementRecu: vi.fn(async () => undefined),
+}))
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -264,8 +273,9 @@ describe('cas 3 — liens de notification cassés : aucune écriture de notifica
       },
     })
     expect(messageCreate).toHaveBeenCalledTimes(1)
-    // Les hooks M9 (no-op aujourd'hui) portent les événements de notification
-    // de M9 — jamais une écriture inline depuis l'envoi.
+    // Les hooks M9 sont BRANCHÉS vers leur résolveur (stubbé ci-dessus) :
+    // les événements partent en fire-and-forget — jamais d'écriture
+    // notification INLINE depuis l'action.
   })
 })
 
