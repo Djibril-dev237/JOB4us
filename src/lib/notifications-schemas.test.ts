@@ -12,8 +12,8 @@ import {
 
 // ─── Contrats des schémas M9 ─────────────────────────────────────────────────
 // Verrouillent la FORME uniquement (l'autorisation et l'écriture appartiennent
-// aux actions) : catalogue de 9 types emprunté à notifications-labels (les 9
-// acceptées, toute valeur hors liste rejetée), curseur ISO-8601 avec offset +
+// aux actions) : catalogue de 10 types emprunté à notifications-labels (les 10
+// acceptés, toute valeur hors liste rejetée), curseur ISO-8601 avec offset +
 // id entier positif borné, booléens STRICTS (aucune coercition : « true » et
 // 1 rejetés), ids de notification entiers stricts (0, -1, 1.5 et chaînes
 // rejetés), `.strict()` contre les clés injectées — y compris sur l'objet vide

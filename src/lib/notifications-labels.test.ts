@@ -13,21 +13,23 @@ import {
 } from './notifications-labels'
 
 // ─── Contrats inter-SA (M9, pré-vague) ───────────────────────────────────────
-// Verrouillent ce que les vagues suivantes importent : catalogue FERMÉ de 9
+// Verrouillent ce que les vagues suivantes importent : catalogue FERMÉ de 10
 // types (l'enum Prisma de la Vague 1 en reprend les valeurs ; `systeme`
-// ajouté par l'arbitrage de la Vague 1), métadonnées complètes pour chaque
+// ajouté par l'arbitrage de la Vague 1, `moderation` par M10), métadonnées
+// complètes pour chaque
 // type, défauts dérivés (jamais de seed), fabrique de texte à variables
 // FERMÉE (règle de confidentialité structurelle), table TEXTES verrouillée
 // mot pour mot (règle anti-vibecoding).
 // ---------------------------------------------------------------------------
 
 describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
-  it('expose exactement les 9 types du catalogue validé', () => {
+  it('expose exactement les 10 types du catalogue validé', () => {
     expect([...TYPE_NOTIFICATIONS].sort()).toEqual(
       [
         'candidatureRecue',
         'candidatureRetiree',
         'entrepriseCertifiee',
+        'moderation',
         'nouveauMessage',
         'offreIndisponible',
         'offrePubliee',
@@ -60,15 +62,17 @@ describe('TYPE_NOTIFICATIONS (catalogue fermé)', () => {
     expect(METADONNEES.entrepriseCertifiee.emailParDefaut).toBe(false)
     // 9e type (arbitrage Vague 1) : legacy n'envoyait aucun email.
     expect(METADONNEES.systeme.emailParDefaut).toBe(false)
+    // M10 : la décision de modération est un devoir d'information, email ON.
+    expect(METADONNEES.moderation.emailParDefaut).toBe(true)
   })
 
-  it('seul signalementRecu est non désactivable (devoir de modération)', () => {
-    expect(TYPES_NON_DESACTIVABLES).toEqual(['signalementRecu'])
+  it('signalementRecu et moderation sont non désactivables (devoir de modération)', () => {
+    expect(TYPES_NON_DESACTIVABLES).toEqual(['signalementRecu', 'moderation'])
   })
 })
 
 describe('preferencesParDefaut (défauts dérivés du catalogue)', () => {
-  it('couvre les 9 types et reflète emailParDefaut', () => {
+  it('couvre les 10 types et reflète emailParDefaut', () => {
     const defauts = preferencesParDefaut()
     expect(Object.keys(defauts).sort()).toEqual([...TYPE_NOTIFICATIONS].sort())
     for (const type of TYPE_NOTIFICATIONS) {
@@ -112,6 +116,7 @@ describe('texteNotification (fabrique à variables fermées)', () => {
       texteNotification({ type: 'offrePubliee', titreOffre: 'Développeur' }),
       texteNotification({ type: 'entrepriseCertifiee', nomEntreprise: 'ACME' }),
       texteNotification({ type: 'systeme', acteur: 'Marie Dupont', role: 'candidat' }),
+      texteNotification({ type: 'moderation', decision: 'avertissement' }),
     ]
     for (const { titre, contenu } of productions) {
       expect(titre.length).toBeGreaterThan(0)
@@ -133,6 +138,12 @@ describe('texteNotification (fabrique à variables fermées)', () => {
       titre: 'Nouvel utilisateur inscrit',
       contenu: 'Marie Dupont vient de créer un compte recruteur.',
     })
+  })
+
+  it('moderation ne divulgue que la décision, jamais le message ni le mis en cause', () => {
+    const texte = texteNotification({ type: 'moderation', decision: 'suspension' })
+    expect(texte.titre).toBe('Décision de modération')
+    expect(texte.contenu).toBe('Votre signalement a été traité : Suspension du compte.')
   })
 
   it('recopie les variables telles quelles (le titre d’offre arrive intact)', () => {
@@ -176,6 +187,6 @@ describe('TEXTES (table verrouillée, anti-vibecoding)', () => {
 describe('types exports (contrat TypeScript)', () => {
   it('TypeNotification accepte chaque membre du catalogue', () => {
     const tous: TypeNotification[] = [...TYPE_NOTIFICATIONS]
-    expect(tous).toHaveLength(9)
+    expect(tous).toHaveLength(10)
   })
 })

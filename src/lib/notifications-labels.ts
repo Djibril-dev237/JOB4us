@@ -7,12 +7,14 @@
 // anti-vibecoding).
 //
 // Décisions qui se matérialisent ici (Étapes 2 et 4 validées) :
-//  * le CATALOGUE est une liste fermée de 9 types : toute notification
+//  * le CATALOGUE est une liste fermée de 10 types : toute notification
 //    appartient à `TypeNotification`, le schema Prisma (Vague 1) en reprend
 //    les valeurs telles quelles — aucun type libre, aucune inscription
 //    hors catalogue. (8 types validés en Étape 2, plus `systeme` ajouté par
 //    l'arbitrage de la Vague 1 pour la notification legacy « nouvel
-//    utilisateur inscrit » vers les admins, parité M4 — in-app seulement.)
+//    utilisateur inscrit » vers les admins, parité M4 — in-app seulement,
+//    plus `moderation` ajouté par M10 pour informer l'auteur d'un signalement
+//    de la décision prise.)
 //  * chaque type porte ses métadonnées en UN SEUL endroit : libellé,
 //    description de préférence, défaut email, désactivabilité. Les pages,
 //    l'émission et les emails lisent ce tableau, jamais l'inverse ;
@@ -31,6 +33,7 @@
 // ---------------------------------------------------------------------------
 
 import type { RegisterRole } from '@/lib/definitions'
+import { libelleDecision, type DecisionSignalement } from '@/lib/moderation-labels'
 
 /**
  * Catalogue fermé des notifications (source de vérité du module).
@@ -46,6 +49,7 @@ export const TYPE_NOTIFICATIONS = [
   'offrePubliee',
   'entrepriseCertifiee',
   'systeme',
+  'moderation',
 ] as const
 
 export type TypeNotification = (typeof TYPE_NOTIFICATIONS)[number]
@@ -69,6 +73,8 @@ export interface MetadonneesType {
  * modération, volume faible et constant) ; `systeme` (9e type, arbitrage de
  * la Vague 1) reste in-app SEULEMENT comme le legacy : RegisterController
  * n'envoyait aucun email, l'admin n'a pas à être dérangé pour une inscription.
+ * `moderation` (10e type, M10) est non désactivable et part par email : le
+ * devoir d'information de l'auteur du signalement prime.
  */
 export const METADONNEES: Record<TypeNotification, MetadonneesType> = {
   candidatureRecue: {
@@ -128,6 +134,12 @@ export const METADONNEES: Record<TypeNotification, MetadonneesType> = {
     description: 'Recevoir une notification quand un nouvel utilisateur crée un compte.',
     emailParDefaut: false,
     desactivable: true,
+  },
+  moderation: {
+    libelle: 'Décision de modération',
+    description: 'Recevoir un email quand votre signalement est traité.',
+    emailParDefaut: true,
+    desactivable: false,
   },
 }
 
@@ -198,6 +210,13 @@ export interface VariablesSysteme {
   /** Rôle déclaré à l'inscription : union FERMÉE, jamais une chaîne libre. */
   role: RegisterRole
 }
+export interface VariablesModeration {
+  /**
+   * Décision rendue sur le signalement de l'auteur. Union FERMÉE : aucun
+   * texte de message, aucun nom de mis en cause, aucune donnée privée.
+   */
+  decision: DecisionSignalement
+}
 
 export type VariablesNotification =
   | ({ type: 'candidatureRecue' } & VariablesCandidatureRecue)
@@ -210,6 +229,7 @@ export type VariablesNotification =
   | ({ type: 'offrePubliee' } & VariablesOffrePubliee)
   | ({ type: 'entrepriseCertifiee' } & VariablesEntrepriseCertifiee)
   | ({ type: 'systeme' } & VariablesSysteme)
+  | ({ type: 'moderation' } & VariablesModeration)
 
 /** Titre et contenu in-app d'une notification, du catalogue uniquement. */
 export function texteNotification(
@@ -262,6 +282,13 @@ export function texteNotification(
       return {
         titre: 'Nouvel utilisateur inscrit',
         contenu: `${variables.acteur} vient de créer un compte ${variables.role}.`,
+      }
+    case 'moderation':
+      // Aucun contenu du message, aucun nom du mis en cause : l'auteur du
+      // signalement reçoit seulement la décision qui le concerne.
+      return {
+        titre: 'Décision de modération',
+        contenu: `Votre signalement a été traité : ${libelleDecision(variables.decision)}.`,
       }
   }
 }
