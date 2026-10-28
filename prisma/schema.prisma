@@ -12,38 +12,103 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model User {
-  id                Int            @id @default(autoincrement())
-  name              String         @db.VarChar(100)
-  email             String?        @unique @db.VarChar(150)
-  password          String?        @db.VarChar(255)
-  role              Role
-  avatar            String?        @db.VarChar(255)
-  phone             String?        @unique @db.VarChar(20)
-  ville             String?        @db.VarChar(100)
-  pays              String         @default("Cameroun") @db.VarChar(100)
-  isActive          Boolean        @default(true) @map("is_active")
-  emailVerifiedAt   DateTime?      @map("email_verified_at")
-  rememberToken     String?        @map("remember_token")
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
+  id              Int       @id @default(autoincrement())
+  name            String    @db.VarChar(100)
+  email           String?   @unique @db.VarChar(150)
+  password        String?   @db.VarChar(255)
+  role            Role
+  avatar          String?   @db.VarChar(255)
+  phone           String?   @unique @db.VarChar(20)
+  ville           String?   @db.VarChar(100)
+  pays            String    @default("Cameroun") @db.VarChar(100)
+  isActive        Boolean   @default(true) @map("is_active")
+  // M10 : invalidation immédiate des sessions (suspension, révocation).
+  // Le JWT porte la valeur au moment de la connexion ; le DAL la compare à
+  // la base à chaque lecture autoritaire.
+  sessionVersion  Int       @default(0) @map("session_version")
+  // M10 : double authentification des admins. Le secret est chiffré avec
+  // ADMIN_2FA_KEY, jamais stocké en clair. `totpLastStep` bloque le rejeu
+  // d'un même pas de 30 secondes.
+  totpSecret      String?   @map("totp_secret") @db.VarChar(255)
+  totpEnabledAt   DateTime? @map("totp_enabled_at")
+  totpLastStep    Int?      @map("totp_last_step")
+  // M10 : procédure CLI d'anonymisation, jamais de suppression physique.
+  anonymizedAt    DateTime? @map("anonymized_at")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  rememberToken   String?   @map("remember_token")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  candidat          Candidat?
-  entreprise        Entreprise?
-  messages          Message[]
-  conversationsEtat ConversationEtat[]
-  blocagesEmis      Blocage[]         @relation("BlocageEmis")
-  blocagesRecus     Blocage[]         @relation("BlocageRecus")
-  signalementsEmis  Signalement[]     @relation("SignalementAuteur")
-  signalementsTraites Signalement[]   @relation("SignalementTraite")
-  notifications     Notification[]
-  notificationsReglages NotificationReglage[]
+  candidat                 Candidat?
+  entreprise               Entreprise?
+  messages                 Message[]
+  conversationsEtat        ConversationEtat[]
+  blocagesEmis             Blocage[]                @relation("BlocageEmis")
+  blocagesRecus            Blocage[]                @relation("BlocageRecus")
+  signalementsEmis         Signalement[]            @relation("SignalementAuteur")
+  signalementsTraites      Signalement[]            @relation("SignalementTraite")
+  notifications            Notification[]
+  notificationsReglages    NotificationReglage[]
   notificationsPreferences NotificationPreference[]
-  emailsNotifications EmailNotification[] @relation("EmailsNotification")
-  offresSauvegardees OffreSauvegardee[]
-  accounts          Account[]
-  sessions          Session[]
+  emailsNotifications      EmailNotification[]      @relation("EmailsNotification")
+  offresSauvegardees       OffreSauvegardee[]
+  accounts                 Account[]
+  sessions                 Session[]
+  adminInvitations         AdminInvitation[]
+  adminRecoveryCodes       AdminRecoveryCode[]
+  adminAuthChallenges      AdminAuthChallenge[]
 
   @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// M10 — ACCÈS ADMINISTRATEUR
+// ---------------------------------------------------------------------------
+// Les comptes admin ne sont jamais créés ni promus depuis l'interface. La CLI
+// crée le compte, émet une invitation de 24 heures, puis l'activation définit
+// le mot de passe et la double authentification. Les jetons et codes sont
+// stockés HACHÉS : le secret en clair ne quitte le serveur qu'une seule fois.
+// ---------------------------------------------------------------------------
+
+model AdminInvitation {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt], map: "admin_invitations_user_idx")
+  @@map("admin_invitations")
+}
+
+model AdminRecoveryCode {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  codeHash  String    @unique @map("code_hash") @db.VarChar(64)
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt], map: "admin_recovery_codes_user_idx")
+  @@map("admin_recovery_codes")
+}
+
+model AdminAuthChallenge {
+  id         String    @id @default(cuid())
+  userId     Int       @map("user_id")
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt], map: "admin_auth_challenges_user_idx")
+  @@map("admin_auth_challenges")
 }
 
 enum Role {
@@ -59,22 +124,22 @@ enum Role {
 // ---------------------------------------------------------------------------
 
 model Candidat {
-  id             Int                     @id @default(autoincrement())
-  userId         Int                     @unique @map("user_id")
-  titreProfil    String?                 @map("titre_profil") @db.VarChar(150)
-  resume         String?                 @db.Text
-  cvPath         String?                 @map("cv_path")
-  dateNaissance  DateTime?               @map("date_naissance") @db.Date
-  genre          Genre?
-  disponibilite  Disponibilite           @default(immediat)
-  createdAt      DateTime                @default(now()) @map("created_at")
-  updatedAt      DateTime                @updatedAt @map("updated_at")
+  id            Int           @id @default(autoincrement())
+  userId        Int           @unique @map("user_id")
+  titreProfil   String?       @map("titre_profil") @db.VarChar(150)
+  resume        String?       @db.Text
+  cvPath        String?       @map("cv_path")
+  dateNaissance DateTime?     @map("date_naissance") @db.Date
+  genre         Genre?
+  disponibilite Disponibilite @default(immediat)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
 
-  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  competences    CandidatCompetence[]
-  candidatures   Candidature[]
-  experiences    Experience[]
-  formations     Formation[]
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competences  CandidatCompetence[]
+  candidatures Candidature[]
+  experiences  Experience[]
+  formations   Formation[]
 
   @@map("candidats")
 }
@@ -108,7 +173,7 @@ model Experience {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  candidat    Candidat  @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  candidat Candidat @relation(fields: [candidatId], references: [id], onDelete: Cascade)
 
   @@index([candidatId], map: "experiences_candidat_id_fkey")
   @@map("experiences")
@@ -126,7 +191,7 @@ model Formation {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  candidat      Candidat  @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  candidat Candidat @relation(fields: [candidatId], references: [id], onDelete: Cascade)
 
   @@index([candidatId], map: "formations_candidat_id_fkey")
   @@map("formations")
@@ -137,25 +202,25 @@ model Formation {
 // ---------------------------------------------------------------------------
 
 model Entreprise {
-  id                Int             @id @default(autoincrement())
-  userId            Int             @unique @map("user_id")
-  nom               String          @db.VarChar(150)
-  description       String?         @db.Text
-  secteurActivite   String?         @map("secteur_activite") @db.VarChar(150)
-  tailleEntreprise  String?         @map("taille_entreprise") @db.VarChar(20)
-  siteWeb           String?         @map("site_web")
-  emailContact      String?         @map("email_contact")
-  telephone         String?
-  adresse           String?
-  logo              String?
-  ville             String?         @db.VarChar(100)
-  pays              String          @default("Cameroun") @db.VarChar(100)
-  isVerified        Boolean         @default(false) @map("is_verified")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique @map("user_id")
+  nom              String   @db.VarChar(150)
+  description      String?  @db.Text
+  secteurActivite  String?  @map("secteur_activite") @db.VarChar(150)
+  tailleEntreprise String?  @map("taille_entreprise") @db.VarChar(20)
+  siteWeb          String?  @map("site_web")
+  emailContact     String?  @map("email_contact")
+  telephone        String?
+  adresse          String?
+  logo             String?
+  ville            String?  @db.VarChar(100)
+  pays             String   @default("Cameroun") @db.VarChar(100)
+  isVerified       Boolean  @default(false) @map("is_verified")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  offres            Offre[]
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offres Offre[]
 
   @@map("entreprises")
 }
@@ -165,25 +230,25 @@ model Entreprise {
 // ---------------------------------------------------------------------------
 
 model Categorie {
-  id         Int      @id @default(autoincrement())
-  nom        String   @unique @db.VarChar(100)
-  icone      String?  @db.VarChar(50)
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id        Int      @id @default(autoincrement())
+  nom       String   @unique @db.VarChar(100)
+  icone     String?  @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  offres     Offre[]
+  offres Offre[]
 
   @@map("categories")
 }
 
 model Competence {
-  id          Int                  @id @default(autoincrement())
-  nom         String               @unique @db.VarChar(100)
-  createdAt   DateTime             @default(now()) @map("created_at")
-  updatedAt   DateTime             @updatedAt @map("updated_at")
+  id        Int      @id @default(autoincrement())
+  nom       String   @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  candidats   CandidatCompetence[]
-  offres      OffreCompetence[]
+  candidats CandidatCompetence[]
+  offres    OffreCompetence[]
 
   @@map("competences")
 }
@@ -193,8 +258,8 @@ model CandidatCompetence {
   competenceId Int              @map("competence_id")
   niveau       NiveauCompetence @default(intermediaire)
 
-  candidat     Candidat         @relation(fields: [candidatId], references: [id], onDelete: Cascade)
-  competence   Competence       @relation(fields: [competenceId], references: [id], onDelete: Cascade)
+  candidat   Candidat   @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  competence Competence @relation(fields: [competenceId], references: [id], onDelete: Cascade)
 
   @@id([candidatId, competenceId])
   @@index([competenceId], map: "candidat_competences_competence_id_fkey")
@@ -210,11 +275,11 @@ enum NiveauCompetence {
 }
 
 model OffreCompetence {
-  offreId      Int        @map("offre_id")
-  competenceId Int        @map("competence_id")
+  offreId      Int @map("offre_id")
+  competenceId Int @map("competence_id")
 
-  offre        Offre      @relation(fields: [offreId], references: [id], onDelete: Cascade)
-  competence   Competence @relation(fields: [competenceId], references: [id], onDelete: Cascade)
+  offre      Offre      @relation(fields: [offreId], references: [id], onDelete: Cascade)
+  competence Competence @relation(fields: [competenceId], references: [id], onDelete: Cascade)
 
   @@id([offreId, competenceId])
   @@index([competenceId], map: "offre_competences_competence_id_fkey")
@@ -226,38 +291,38 @@ model OffreCompetence {
 // ---------------------------------------------------------------------------
 
 model Offre {
-  id                Int               @id @default(autoincrement())
-  entrepriseId      Int               @map("entreprise_id")
-  categorieId       Int               @map("categorie_id")
-  titre             String            @db.VarChar(200)
-  description       String            @db.LongText
-  typeContrat       TypeContrat       @map("type_contrat")
-  niveauExperience  NiveauExperience  @map("niveau_experience")
-  ville             String            @db.VarChar(100)
-  pays              String            @default("Cameroun") @db.VarChar(100)
-  salaireMin        Decimal?          @map("salaire_min") @db.Decimal(10, 2)
-  salaireMax        Decimal?          @map("salaire_max") @db.Decimal(10, 2)
-  salaireVisible    Boolean           @default(false) @map("salaire_visible")
-  dateExpiration    DateTime          @map("date_expiration") @db.Date
+  id               Int              @id @default(autoincrement())
+  entrepriseId     Int              @map("entreprise_id")
+  categorieId      Int              @map("categorie_id")
+  titre            String           @db.VarChar(200)
+  description      String           @db.LongText
+  typeContrat      TypeContrat      @map("type_contrat")
+  niveauExperience NiveauExperience @map("niveau_experience")
+  ville            String           @db.VarChar(100)
+  pays             String           @default("Cameroun") @db.VarChar(100)
+  salaireMin       Decimal?         @map("salaire_min") @db.Decimal(10, 2)
+  salaireMax       Decimal?         @map("salaire_max") @db.Decimal(10, 2)
+  salaireVisible   Boolean          @default(false) @map("salaire_visible")
+  dateExpiration   DateTime         @map("date_expiration") @db.Date
   // Cycle de vie M6 (étape 2 validée) : 4 statuts stockés (l'ancien
   // booléen is_active, qui fusionnait brouillon et suspension, est
   // supprimé) — voir enum StatutOffre + migration m6.
-  statut            StatutOffre       @default(brouillon)
+  statut           StatutOffre      @default(brouillon)
   // Suppression LOGIQUE M6 (étape 2) : jamais de delete physique —
   // candidatures.offre_id est en cascade, l'historique M7 doit survivre.
-  deletedAt         DateTime?         @map("deleted_at")
-  vues              Int               @default(0) @db.UnsignedInt
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt        DateTime?        @map("deleted_at")
+  vues             Int              @default(0) @db.UnsignedInt
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
   // URL publique (M5) : « titre-slug-<id> », unique, nullable car ajouté
   // sur table peuplée (backfill dans la migration) — voir src/lib/slug.ts.
-  slug              String?           @unique @db.VarChar(220)
+  slug             String?          @unique @db.VarChar(220)
 
-  entreprise        Entreprise        @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
-  categorie         Categorie         @relation(fields: [categorieId], references: [id], onDelete: Restrict)
-  candidatures      Candidature[]
-  competences       OffreCompetence[]
-  savedByUsers      OffreSauvegardee[]
+  entreprise   Entreprise         @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
+  categorie    Categorie          @relation(fields: [categorieId], references: [id], onDelete: Restrict)
+  candidatures Candidature[]
+  competences  OffreCompetence[]
+  savedByUsers OffreSauvegardee[]
 
   @@index([categorieId], map: "offres_categorie_id_fkey")
   @@index([entrepriseId], map: "offres_entreprise_id_fkey")
@@ -331,10 +396,10 @@ model Candidature {
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
 
-  offre            Offre             @relation(fields: [offreId], references: [id], onDelete: Cascade)
-  candidat         Candidat          @relation(fields: [candidatId], references: [id], onDelete: Cascade)
+  offre        Offre         @relation(fields: [offreId], references: [id], onDelete: Cascade)
+  candidat     Candidat      @relation(fields: [candidatId], references: [id], onDelete: Cascade)
   // M8 : une conversation par candidature (clé portée par Conversation).
-  conversation     Conversation?
+  conversation Conversation?
 
   @@unique([offreId, candidatId])
   // M7 : l'index FK simple `candidatId` devient composite (candidatId,
@@ -358,18 +423,17 @@ model Candidature {
  * Journal APPEND-ONLY des lectures de CV par un recruteur ou un admin
  * (matrice Étape 2 : « admin = lecture justifiée + journal » ; le candidat
  * lisant son propre CV n'est pas un événement sensible et n'est pas journalisé).
- *
  * Conception délibérée :
  * - AUCUNE clé étrangère : la trace survit à la suppression d'un compte
- *   (intégrité d'audit > intégrité référentielle) ;
+ * (intégrité d'audit > intégrité référentielle) ;
  * - pas d'updatedAt : table en ajout pur, jamais mise à jour ;
  * - `cibleCandidatId` = l'identifiant du profil CV lu (la cible du fichier).
  */
 model AccesFichier {
-  id             Int      @id @default(autoincrement())
-  acteurId       Int      @map("acteur_id")
-  cibleCandidatId Int     @map("cible_candidat_id")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id              Int      @id @default(autoincrement())
+  acteurId        Int      @map("acteur_id")
+  cibleCandidatId Int      @map("cible_candidat_id")
+  createdAt       DateTime @default(now()) @map("created_at")
 
   @@index([acteurId], map: "acces_fichiers_acteur_id_idx")
   @@index([cibleCandidatId], map: "acces_fichiers_cible_candidat_id_idx")
@@ -389,13 +453,13 @@ model AccesFichier {
 // Les transitions sont journées UNIQUEMENT par l'action serveur
 // (aucun chemin client ne peut écrire ici : la table n'a pas de route).
 model AuditCandidature {
-  id             Int      @id @default(autoincrement())
-  candidatureId  Int      @map("candidature_id")
-  acteurId       Int      @map("acteur_id")
-  action         String   @db.VarChar(50)
-  ancienStatut   String?  @map("ancien_statut") @db.VarChar(30)
-  nouveauStatut  String?  @map("nouveau_statut") @db.VarChar(30)
-  createdAt      DateTime @default(now()) @map("created_at")
+  id            Int      @id @default(autoincrement())
+  candidatureId Int      @map("candidature_id")
+  acteurId      Int      @map("acteur_id")
+  action        String   @db.VarChar(50)
+  ancienStatut  String?  @map("ancien_statut") @db.VarChar(30)
+  nouveauStatut String?  @map("nouveau_statut") @db.VarChar(30)
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([candidatureId], map: "audit_candidatures_candidature_id_idx")
   @@index([acteurId], map: "audit_candidatures_acteur_id_idx")
@@ -435,17 +499,17 @@ enum StatutCandidature {
 // d'appartenance tombe dans la même requête que la lecture.
 // ---------------------------------------------------------------------------
 model Conversation {
-  id            Int          @id @default(autoincrement())
+  id            Int      @id @default(autoincrement())
   // Une seule conversation par candidature : contrainte DB → doublon
   // structurellement impossible, y compris en course (contrairement à
   // l'ancien unique (candidat, recruteur, offre) poreux avec offre NULL).
-  candidatureId Int          @unique @map("candidature_id")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  candidatureId Int      @unique @map("candidature_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  candidature   Candidature  @relation(fields: [candidatureId], references: [id], onDelete: Cascade)
-  messages      Message[]
-  etats         ConversationEtat[]
+  candidature Candidature        @relation(fields: [candidatureId], references: [id], onDelete: Cascade)
+  messages    Message[]
+  etats       ConversationEtat[]
 
   @@map("conversations")
 }
@@ -454,15 +518,15 @@ model Conversation {
 // tronque à 2000 caractères (messagerie-contenu.ts, Étape 2 §6/§7).
 // Pas d'updatedAt : les messages sont immuables (append-only).
 model Message {
-  id              Int          @id @default(autoincrement())
-  conversationId  Int          @map("conversation_id")
-  senderId        Int          @map("sender_id")
-  contenu         String       @db.Text
-  createdAt       DateTime     @default(now()) @map("created_at")
+  id             Int      @id @default(autoincrement())
+  conversationId Int      @map("conversation_id")
+  senderId       Int      @map("sender_id")
+  contenu        String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  signalements    Signalement[]
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  signalements Signalement[]
 
   // Curseur de pagination (WHERE conversation_id = ? AND created_at < ?)
   // — colonne de tête = FK couverte, pas de filesort. Le senderId garde
@@ -470,6 +534,33 @@ model Message {
   @@index([conversationId, createdAt], map: "messages_conv_created_idx")
   @@index([senderId], map: "messages_sender_id_fkey")
   @@map("messages")
+}
+
+// MASQUAGE / RÉTABLISSEMENT D'UN MESSAGE (M10) — journal append-only de
+// l'effet de modération. Message reste immuable : l'état courant est la
+// dernière ligne de ce journal. Aucune clé étrangère, même doctrine que les
+// audits : la trace survit à toute suppression et ne peut être modifiée.
+enum MessageModerationAction {
+  masquage
+  retablissement
+
+  @@map("message_moderation_action")
+}
+
+model MessageModeration {
+  id            Int                     @id @default(autoincrement())
+  messageId     Int                     @map("message_id")
+  signalementId Int?                    @map("signalement_id")
+  acteurId      Int                     @map("acteur_id")
+  action        MessageModerationAction
+  motif         String                  @db.VarChar(50)
+  noteInterne   String?                 @map("note_interne") @db.Text
+  createdAt     DateTime                @default(now()) @map("created_at")
+
+  @@index([messageId, createdAt, id], map: "message_moderation_message_idx")
+  @@index([signalementId], map: "message_moderation_signalement_idx")
+  @@index([acteurId], map: "message_moderation_acteur_idx")
+  @@map("message_moderation")
 }
 
 // ÉTAT PAR PARTICIPANT (Étape 2 §4/§8) : masquage logique et accusé de
@@ -482,8 +573,8 @@ model ConversationEtat {
   luLe           DateTime? @map("lu_le")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([conversationId, userId])
   // Liste « mes conversations » : exclusion des masquées de mon côté
@@ -501,8 +592,8 @@ model Blocage {
   bloqueId   Int      @map("bloque_id")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  bloqueur   User     @relation("BlocageEmis", fields: [bloqueurId], references: [id], onDelete: Cascade)
-  bloque     User     @relation("BlocageRecus", fields: [bloqueId], references: [id], onDelete: Cascade)
+  bloqueur User @relation("BlocageEmis", fields: [bloqueurId], references: [id], onDelete: Cascade)
+  bloque   User @relation("BlocageRecus", fields: [bloqueId], references: [id], onDelete: Cascade)
 
   @@unique([bloqueurId, bloqueId])
   // « ai-je bloqué X » / « qui m'a bloqué » en indexé.
@@ -517,27 +608,44 @@ enum StatutSignalement {
   @@map("signalements_statut")
 }
 
+// DÉCISION DE MODÉRATION (M10) — vocabulaire fermé, une seule décision par
+// signalement traité. `suspension` implique le masquage du message signalé ;
+// l'effet est matérialisé dans MessageModeration, jamais par un UPDATE du
+// message lui-même.
+enum SignalementDecision {
+  sans_suite
+  avertissement
+  masquage
+  suspension
+
+  @@map("signalements_decision")
+}
+
 // SIGNALEMENT D'UN MESSAGE (Étape 2 §5) : un participant peut signaler
 // même bloqué (le blocage ne doit pas couvrir le harcèlement).
 model Signalement {
-  id          Int               @id @default(autoincrement())
-  messageId   Int               @map("message_id")
-  auteurId    Int               @map("auteur_id")
-  motif       String            @db.VarChar(300)
-  statut      StatutSignalement @default(ouvert)
-  noteInterne String?           @map("note_interne") @db.Text
-  traiteParId Int?              @map("traite_par_id")
-  traiteLe    DateTime?         @map("traite_le")
-  createdAt   DateTime          @default(now()) @map("created_at")
+  id            Int                  @id @default(autoincrement())
+  messageId     Int                  @map("message_id")
+  auteurId      Int                  @map("auteur_id")
+  motif         String               @db.VarChar(300)
+  statut        StatutSignalement    @default(ouvert)
+  decision      SignalementDecision? @map("decision")
+  motifDecision String?              @map("motif_decision") @db.VarChar(50)
+  noteInterne   String?              @map("note_interne") @db.Text
+  traiteParId   Int?                 @map("traite_par_id")
+  traiteLe      DateTime?            @map("traite_le")
+  createdAt     DateTime             @default(now()) @map("created_at")
 
-  message     Message           @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  auteur      User              @relation("SignalementAuteur", fields: [auteurId], references: [id], onDelete: Cascade)
-  traitePar   User?             @relation("SignalementTraite", fields: [traiteParId], references: [id], onDelete: SetNull)
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  auteur    User    @relation("SignalementAuteur", fields: [auteurId], references: [id], onDelete: Cascade)
+  traitePar User?   @relation("SignalementTraite", fields: [traiteParId], references: [id], onDelete: SetNull)
 
   // Pas de doublon : un seul signalement par (message, auteur).
   @@unique([messageId, auteurId])
   // File de modération : WHERE statut = 'ouvert' ORDER BY created_at.
   @@index([statut, createdAt], map: "signalements_statut_idx")
+  // Statistiques : délai moyen de traitement sur 30 jours.
+  @@index([statut, traiteLe], map: "signalements_statut_traite_idx")
   @@map("signalements")
 }
 
@@ -556,6 +664,27 @@ model AuditConversation {
   @@index([acteurId], map: "audit_conversations_acteur_id_idx")
   @@index([createdAt], map: "audit_conversations_created_at_idx")
   @@map("audit_conversations")
+}
+
+// JOURNAL D'AUDIT GÉNÉRIQUE (M10) — trace immuable de toute action sensible
+// d'administration. Aucune clé étrangère, aucun updatedAt : l'acteur et la
+// cible sont des identifiants historiques, pas des relations vivantes. Une
+// vue MySQL en lecture seule agrège aussi les journaux M7/M8 existants.
+model JournalAudit {
+  id          Int      @id @default(autoincrement())
+  acteurId    Int      @map("acteur_id")
+  action      String   @db.VarChar(80)
+  cibleType   String   @map("cible_type") @db.VarChar(30)
+  cibleId     Int?     @map("cible_id")
+  motif       String?  @db.VarChar(50)
+  commentaire String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt], map: "journal_audit_created_idx")
+  @@index([acteurId, createdAt], map: "journal_audit_acteur_idx")
+  @@index([cibleType, cibleId, createdAt], map: "journal_audit_cible_idx")
+  @@index([action, createdAt], map: "journal_audit_action_idx")
+  @@map("journal_audit")
 }
 
 // NOTIFICATION IN-APP (M9) — reprise du miroir legacy, durcie :
@@ -593,6 +722,9 @@ enum TypeNotification {
   // s'adressait aux admins et n'avait pas d'équivalent au catalogue —
   // in-app SEULEMENT (legacy n'envoyait aucun email).
   systeme
+  // M10 : information de l'auteur d'un signalement sur la décision prise.
+  // Type non désactivable et email activé par défaut (devoir de modération).
+  moderation
 
   @@map("notifications_type")
 }
@@ -613,8 +745,8 @@ model Notification {
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
 
-  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emails       EmailNotification[]
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails EmailNotification[]
 
   // Compteur de la cloche (header M2) : `userId + isLu = false`.
   @@index([userId, isLu], map: "notifications_user_lu_idx")
@@ -640,7 +772,7 @@ model NotificationPreference {
   emailActive Boolean          @map("email_active")
   updatedAt   DateTime         @updatedAt @map("updated_at")
 
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, type])
   @@map("notification_preferences")
@@ -653,12 +785,12 @@ model NotificationPreference {
 //  * `resumeQuotidien` : digest OFF par défaut (arbitrage Étape 2).
 // ---------------------------------------------------------------------------
 model NotificationReglage {
-  userId          Int       @id @map("user_id")
-  emailsActives   Boolean   @default(true) @map("emails_actives")
-  resumeQuotidien Boolean   @default(false) @map("resume_quotidien")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  userId          Int      @id @map("user_id")
+  emailsActives   Boolean  @default(true) @map("emails_actives")
+  resumeQuotidien Boolean  @default(false) @map("resume_quotidien")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notification_reglages")
 }
@@ -684,28 +816,28 @@ enum StatutEmail {
 //    conflitantes dans l'index unique MySQL).
 // ---------------------------------------------------------------------------
 model EmailNotification {
-  id               Int            @id @default(autoincrement())
-  cle              String         @unique @db.VarChar(200)
-  destinataireId   Int            @map("destinataire_id")
-  notificationId   Int?           @map("notification_id")
-  type             TypeNotification?
-  resumeDu         DateTime?      @map("resume_du")
-  statut           StatutEmail    @default(enAttente)
-  tentatives       Int            @default(0)
-  prochaineTentative DateTime?    @map("prochaine_tentative")
-  envoyeLe         DateTime?      @map("envoye_le")
-  erreur           String?        @db.VarChar(300)
-  createdAt        DateTime       @default(now()) @map("created_at")
+  id                 Int               @id @default(autoincrement())
+  cle                String            @unique @db.VarChar(200)
+  destinataireId     Int               @map("destinataire_id")
+  notificationId     Int?              @map("notification_id")
+  type               TypeNotification?
+  resumeDu           DateTime?         @map("resume_du")
+  statut             StatutEmail       @default(enAttente)
+  tentatives         Int               @default(0)
+  prochaineTentative DateTime?         @map("prochaine_tentative")
+  envoyeLe           DateTime?         @map("envoye_le")
+  erreur             String?           @db.VarChar(300)
+  createdAt          DateTime          @default(now()) @map("created_at")
 
-  destinataire     User           @relation("EmailsNotification", fields: [destinataireId], references: [id], onDelete: Cascade)
-  notification     Notification?  @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  destinataire User          @relation("EmailsNotification", fields: [destinataireId], references: [id], onDelete: Cascade)
+  notification Notification? @relation(fields: [notificationId], references: [id], onDelete: Cascade)
 
+  // Digest : un seul résumé par compte et par jour (NULLs non conflitants).
+  @@unique([destinataireId, resumeDu], map: "emails_resume_uniq")
   // Ramassage de la file : WHERE statut = enAttente AND prochaineTentative < now.
   @@index([statut, prochaineTentative], map: "emails_drain_idx")
   // Plafonds 6/h et 30/j par destinataire (compté sur createdAt).
   @@index([destinataireId, createdAt], map: "emails_plafond_idx")
-  // Digest : un seul résumé par compte et par jour (NULLs non conflitants).
-  @@unique([destinataireId, resumeDu], map: "emails_resume_uniq")
   @@map("emails_notifications")
 }
 
@@ -729,7 +861,7 @@ model Account {
   id_token          String? @db.Text
   session_state     String? @map("session_state")
 
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@index([userId], map: "accounts_user_id_fkey")
@@ -742,7 +874,7 @@ model Session {
   userId       Int      @map("user_id")
   expires      DateTime
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId], map: "sessions_user_id_fkey")
   @@map("sessions")
