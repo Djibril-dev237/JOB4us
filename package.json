@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "admin": "node --env-file=.env --experimental-strip-types scripts/admin.mjs",
     "legacy:files": "node --env-file=.env scripts/migrate-legacy-files.mjs"
   },
   "dependencies": {
