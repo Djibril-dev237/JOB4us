@@ -36,7 +36,9 @@ import {
 // COUCHE 2 — Gate par rôle, contrôle OPTIMISTE (M1, restauré en M6 P0) :
 // lecture du cookie JWT Auth.js sans base, redirections rapides
 // /login (visiteur) et /unauthorized (rôle insuffisant), + redirection
-// /login→/ pour un connecté. RESTAURÉ car le commit M5 `7a4aade` avait
+// /login→/ pour un connecté. EXCEPTION M10 : /admin répond 404 strict
+// (rewrite) à tout visiteur ou non-admin, jamais une redirection qui
+// confirmerait l'existence de l'espace. RESTAURÉ car le commit M5 `7a4aade` avait
 // réécrit ce fichier en entier et perdu cette couche (diagnostic M6
 // addendum : les pages du groupe (app) sont synchrones et s'appuyaient
 // dessus, aucune ne rappelle verifyRole au rendu). Le contrôle
@@ -231,6 +233,16 @@ async function controlerAccesEspace(request: NextRequest): Promise<ResultatAcces
     return session !== null
       ? { decision: NextResponse.redirect(new URL('/', request.url)) }
       : undefined
+  }
+
+  // Espace admin : 404 STRICT pour visiteur et non-admin. Aucune
+  // redirection vers /login ou /unauthorized ne doit révéler l'existence
+  // des pages d'administration. Le DAL reprend le contrôle en base.
+  if (routeRole?.prefix === '/admin') {
+    if (session === null || session.role !== 'admin') {
+      return { decision: NextResponse.rewrite(new URL('/404', request.url)) }
+    }
+    return { session }
   }
 
   // Non connecté → page de connexion.

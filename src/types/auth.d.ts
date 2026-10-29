@@ -9,6 +9,8 @@ declare module '@auth/core/types' {
   interface User {
     /** Rôle porté par le provider credentials (non stocké en base). */
     role?: Role
+    /** Version de session lue en base au moment de la connexion (M10). */
+    sessionVersion?: number
   }
 
   interface Session {
@@ -23,6 +25,7 @@ declare module '@auth/core/types' {
     user: {
       id?: number
       role?: Role
+      sessionVersion?: number
     } & Omit<NonNullable<DefaultSession['user']>, 'id'>
   }
 }
@@ -31,5 +34,6 @@ declare module '@auth/core/jwt' {
   interface JWT {
     userId?: number
     role?: Role
+    sessionVersion?: number
   }
 }

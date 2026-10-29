@@ -5,8 +5,10 @@ import Credentials from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@auth/prisma-adapter'
 import bcrypt from 'bcryptjs'
 
+import { ADMIN_SESSION_MAX_AGE_SECONDS } from '@/lib/admin-crypto'
+import { verifierChallengeAdmin } from '@/lib/admin-auth'
 import { prisma } from '@/lib/prisma'
-import { LoginSchema } from '@/lib/definitions'
+import { LoginSchema, type Role } from '@/lib/definitions'
 import {
   LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER,
   LOGIN_WINDOW_MS,
@@ -44,12 +46,154 @@ export function normalizeBcryptHash(hash: string): string {
  */
 const TIMING_DECOY_HASH = '$2b$10$AnYHo7fxr3egsANmLJ1OTe.D1qGj0v/Q423J0p8YE1QiKDOdASE2.'
 
-async function verifyPassword(plainPassword: string, storedHash: string | null): Promise<boolean> {
+export async function verifyPassword(
+  plainPassword: string,
+  storedHash: string | null,
+): Promise<boolean> {
   if (!storedHash) {
     await bcrypt.compare(plainPassword, TIMING_DECOY_HASH)
     return false
   }
   return bcrypt.compare(plainPassword, normalizeBcryptHash(storedHash))
+}
+
+// ─── Autorisation des identifiants (testable hors NextAuth) ─────────────────
+//
+// Le provider credentials ordinaire REFUSE toujours un admin : sans cette
+// barrière, un POST direct sur /api/auth/callback/credentials ouvrirait une
+// session sans second facteur. L'action de connexion admin crée un challenge
+// séparé, consommé par le provider `admin-challenge`.
+
+export interface UtilisateurAutorise {
+  id: string
+  name: string
+  email?: string
+  role: Role
+  sessionVersion: number
+}
+
+export async function autoriserIdentifiants(
+  credentials: unknown,
+): Promise<UtilisateurAutorise | null> {
+  const parsed = LoginSchema.safeParse(credentials)
+  if (!parsed.success) return null
+
+  const { identifier, password } = parsed.data
+
+  // Rate limiting PAR IDENTIFIANT placé ici et non dans l'action :
+  // authorize() est le point de passage unique de tout essai
+  // credentials (formulaire OU POST direct sur
+  // /api/auth/callback/credentials), impossible à contourner.
+  // (La limite par IP, elle, nécessite les headers : côté action.)
+  const idKey = `login:id:${identifier.toLowerCase()}`
+  const idLimit = checkRateLimit(idKey, LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER, LOGIN_WINDOW_MS)
+  if (!idLimit.allowed) return null
+
+  // Login par email OU téléphone (compatible legacy PHP).
+  // MySQL : collation utf8mb4_unicode_ci, comparaison insensible
+  // à la casse pour l'email.
+  const user = await prisma.user.findFirst({
+    where: { OR: [{ email: identifier }, { phone: identifier }] },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      password: true,
+      role: true,
+      isActive: true,
+      anonymizedAt: true,
+      sessionVersion: true,
+    },
+  })
+
+  // Compte absent, désactivé ou anonymisé : comparaison factice,
+  // réponse nulle, tentative comptée (comportement identique à un
+  // mauvais mot de passe : aucune fuite sur l'existence du compte).
+  if (!user || !user.isActive || user.anonymizedAt !== null) {
+    await verifyPassword(password, null)
+    recordAttempt(idKey)
+    return null
+  }
+
+  // Un admin ne peut JAMAIS ouvrir une session par le provider
+  // credentials ordinaire : le POST direct sur
+  // /api/auth/callback/credentials contournerait le second facteur.
+  // La vérification du mot de passe est tout de même effectuée pour
+  // garder un temps de réponse comparable, puis la tentative est
+  // comptée. L'action de connexion admin crée le challenge séparément.
+  if (user.role === 'admin') {
+    await verifyPassword(password, user.password)
+    recordAttempt(idKey)
+    return null
+  }
+
+  const valid = await verifyPassword(password, user.password)
+  if (!valid) {
+    recordAttempt(idKey)
+    return null
+  }
+
+  // Connexion réussie : fenêtre de cet identifiant libérée.
+  resetAttempts(idKey)
+
+  // Aucun hash de mot de passe n'est retourné ni journalisé :
+  // seuls les champs non sensibles alimentent la session.
+  return {
+    id: String(user.id),
+    name: user.name,
+    email: user.email ?? undefined,
+    role: user.role,
+    sessionVersion: user.sessionVersion,
+  }
+}
+
+export async function autoriserChallengeAdmin(
+  credentials: unknown,
+): Promise<UtilisateurAutorise | null> {
+  // Le jeton de challenge est passé par la Server Action depuis le
+  // cookie httpOnly : il n'est jamais exposé au formulaire client.
+  const valeurs =
+    credentials && typeof credentials === 'object'
+      ? (credentials as Record<string, unknown>)
+      : {}
+  return verifierChallengeAdmin({
+    challengeToken: valeurs.challengeToken,
+    code: valeurs.code,
+  })
+}
+
+// ─── Claims JWT (testables hors NextAuth) ───────────────────────────────────
+
+export interface UtilisateurJwt {
+  id?: string
+  role?: Role
+  sessionVersion?: number
+}
+
+export function appliquerClaimsJwt<
+  T extends {
+    userId?: number
+    role?: Role
+    sessionVersion?: number
+    exp?: number
+  },
+>(token: T, user?: UtilisateurJwt | null): T {
+  if (user) {
+    const identifiant = Number(user.id)
+    if (Number.isInteger(identifiant) && identifiant > 0) {
+      token.userId = identifiant
+    }
+    token.role = user.role
+    token.sessionVersion =
+      typeof user.sessionVersion === 'number' ? user.sessionVersion : 0
+    // Session admin plafonnée à 8 h, indépendamment du maximum global
+    // de 7 jours. Un admin doit se reconnecter avec TOTP chaque jour
+    // ouvré ; le cookie peut survivre, le jeton serveur non.
+    if (user.role === 'admin') {
+      token.exp = Math.floor(Date.now() / 1000) + ADMIN_SESSION_MAX_AGE_SECONDS
+    }
+  }
+  return token
 }
 
 // ─── Configuration NextAuth (Auth.js) ────────────────────────────────────────
@@ -84,63 +228,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         identifier: { label: 'Email ou téléphone', type: 'text' },
         password: { label: 'Mot de passe', type: 'password' },
       },
-      async authorize(credentials) {
-        const parsed = LoginSchema.safeParse(credentials)
-        if (!parsed.success) return null
-
-        const { identifier, password } = parsed.data
-
-        // Rate limiting PAR IDENTIFIANT placé ici et non dans l'action :
-        // authorize() est le point de passage unique de tout essai
-        // credentials (formulaire OU POST direct sur
-        // /api/auth/callback/credentials), impossible à contourner.
-        // (La limite par IP, elle, nécessite les headers : côté action.)
-        const idKey = `login:id:${identifier.toLowerCase()}`
-        const idLimit = checkRateLimit(idKey, LOGIN_MAX_ATTEMPTS_PER_IDENTIFIER, LOGIN_WINDOW_MS)
-        if (!idLimit.allowed) return null
-
-        // Login par email OU téléphone (compatible legacy PHP).
-        // MySQL : collation utf8mb4_unicode_ci, comparaison insensible
-        // à la casse pour l'email.
-        const user = await prisma.user.findFirst({
-          where: { OR: [{ email: identifier }, { phone: identifier }] },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            password: true,
-            role: true,
-            isActive: true,
-          },
-        })
-
-        // Compte absent ou désactivé : comparaison factice, réponse nulle,
-        // tentative comptée (comportement identique à un mauvais mot de
-        // passe : aucune fuite sur l'existence du compte).
-        if (!user || !user.isActive) {
-          await verifyPassword(password, null)
-          recordAttempt(idKey)
-          return null
-        }
-
-        const valid = await verifyPassword(password, user.password)
-        if (!valid) {
-          recordAttempt(idKey)
-          return null
-        }
-
-        // Connexion réussie : fenêtre de cet identifiant libérée.
-        resetAttempts(idKey)
-
-        // Aucun hash de mot de passe n'est retourné ni journalisé :
-        // seuls les champs non sensibles alimentent la session.
-        return {
-          id: String(user.id),
-          name: user.name,
-          email: user.email ?? undefined,
-          role: user.role,
-        }
+      authorize: autoriserIdentifiants,
+    }),
+    Credentials({
+      id: 'admin-challenge',
+      name: 'Admin challenge',
+      credentials: {
+        challengeToken: { label: 'Challenge', type: 'text' },
+        code: { label: "Code d'authentification", type: 'text' },
       },
+      authorize: autoriserChallengeAdmin,
     }),
   ],
 
@@ -149,11 +246,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // Les changements de rôle / désactivations sont ensuite contrôlés par
     // getCurrentUser() (dal.ts) qui revérifie la base à chaque rendu protégé.
     async jwt({ token, user }) {
-      if (user) {
-        token.userId = Number(user.id)
-        token.role = user.role
-      }
-      return token
+      return appliquerClaimsJwt(token, user)
     },
 
     // Exposition de l'id et du rôle au reste de l'application.
@@ -168,6 +261,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           ...session.user,
           id: typeof token.userId === 'number' ? token.userId : undefined,
           role: typeof token.role === 'string' ? token.role : undefined,
+          sessionVersion:
+            typeof token.sessionVersion === 'number' ? token.sessionVersion : undefined,
         },
       }
     },

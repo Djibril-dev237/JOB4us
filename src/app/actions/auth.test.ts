@@ -18,10 +18,22 @@ import { login } from './auth'
 // le helper `redirectionInterne` est testé en RÉEL (c'est le contrôle).
 // ---------------------------------------------------------------------------
 
-const { signInMock, checkRateLimitMock, recordAttemptMock } = vi.hoisted(() => ({
+const {
+  signInMock,
+  checkRateLimitMock,
+  recordAttemptMock,
+  findFirstMock,
+  verifyPasswordMock,
+  creerChallengeAdminMock,
+  cookieSetMock,
+} = vi.hoisted(() => ({
   signInMock: vi.fn(),
   checkRateLimitMock: vi.fn(),
   recordAttemptMock: vi.fn(),
+  findFirstMock: vi.fn(),
+  verifyPasswordMock: vi.fn(),
+  creerChallengeAdminMock: vi.fn(),
+  cookieSetMock: vi.fn(),
 }))
 
 // Le vrai package next-auth ne se charge pas sous vitest (résolution
@@ -34,6 +46,11 @@ vi.mock('next-auth', () => ({
 vi.mock('@/auth', () => ({
   signIn: signInMock,
   signOut: vi.fn(),
+  verifyPassword: verifyPasswordMock,
+}))
+
+vi.mock('@/lib/admin-auth', () => ({
+  creerChallengeAdmin: creerChallengeAdminMock,
 }))
 
 vi.mock('next/navigation', () => ({
@@ -42,10 +59,15 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('next/headers', () => ({
   headers: vi.fn(async () => new Headers()),
+  cookies: vi.fn(async () => ({
+    get: vi.fn(),
+    set: cookieSetMock,
+    delete: vi.fn(),
+  })),
 }))
 
 vi.mock('@/lib/prisma', () => ({
-  prisma: {},
+  prisma: { user: { findFirst: findFirstMock } },
 }))
 
 vi.mock('@/lib/rate-limit', () => ({
@@ -54,6 +76,7 @@ vi.mock('@/lib/rate-limit', () => ({
   LOGIN_WINDOW_MS: 5 * 60 * 1_000,
   checkRateLimit: checkRateLimitMock,
   recordAttempt: recordAttemptMock,
+  resetAttempts: vi.fn(),
 }))
 
 /** Formulaire de connexion minimal, avec cible `redirect` optionnelle. */
@@ -71,6 +94,8 @@ describe('login — cible de redirection post-connexion', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     signInMock.mockResolvedValue(undefined)
+    findFirstMock.mockResolvedValue(null)
+    verifyPasswordMock.mockResolvedValue(false)
     checkRateLimitMock.mockReturnValue({ allowed: true, retryAfterMs: 0 })
   })
 

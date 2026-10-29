@@ -232,7 +232,6 @@ describe('proxy M6 (gate par rôle restauré — P0)', () => {
     for (const chemin of [
       '/recruteur/offres',
       '/candidat/profil',
-      '/admin/dashboard',
       '/messages',
       '/notifications',
       '/parametres',
@@ -243,6 +242,25 @@ describe('proxy M6 (gate par rôle restauré — P0)', () => {
         'http://localhost:3000/login',
       )
       expect(decode).not.toHaveBeenCalled() // pas de cookie = pas de décodage
+    }
+  })
+
+  it('répond 404 strict à un visiteur ou à un non-admin sur /admin', async () => {
+    const visiteur = await proxy(requeteAvecSession('/admin/dashboard', false))
+    expect(visiteur?.status).toBe(200)
+    expect(visiteur?.headers.get('x-middleware-rewrite')).toBe(
+      'http://localhost:3000/404',
+    )
+    expect(visiteur?.headers.get('location')).toBeNull()
+
+    for (const role of ['candidat', 'recruteur'] as const) {
+      connecte(role)
+      const reponse = await proxy(requeteAvecSession('/admin/dashboard'))
+      expect(reponse?.status).toBe(200)
+      expect(reponse?.headers.get('x-middleware-rewrite')).toBe(
+        'http://localhost:3000/404',
+      )
+      expect(reponse?.headers.get('location')).toBeNull()
     }
   })
 

@@ -2,11 +2,16 @@
 
 import bcrypt from 'bcryptjs'
 import { Prisma } from '@prisma/client'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { CredentialsSignin } from 'next-auth'
 
-import { signIn, signOut } from '@/auth'
+import { signIn, signOut, verifyPassword } from '@/auth'
+import { creerChallengeAdmin } from '@/lib/admin-auth'
+import {
+  ADMIN_CHALLENGE_TTL_MS,
+  COOKIE_CHALLENGE_ADMIN,
+} from '@/lib/admin-crypto'
 import { prisma } from '@/lib/prisma'
 import {
   LoginSchema,
@@ -25,6 +30,7 @@ import {
   LOGIN_WINDOW_MS,
   checkRateLimit,
   recordAttempt,
+  resetAttempts,
 } from '@/lib/rate-limit'
 import { texteNotification } from '@/lib/notifications-labels'
 
@@ -76,6 +82,55 @@ export async function login(
     const retryAfter = Math.max(idLimit.retryAfterMs, ipLimit.retryAfterMs)
     const minutes = Math.max(1, Math.ceil(retryAfter / 60_000))
     return { message: `Trop de tentatives de connexion. Réessayez dans ${minutes} minute(s).` }
+  }
+
+  // Branche admin : le provider credentials ordinaire refuse les admins.
+  // Ici, on vérifie le mot de passe puis on ouvre un challenge court. Le
+  // second facteur est validé par le provider `admin-challenge`, jamais par
+  // un cookie de mot de passe.
+  const compteAdmin = await prisma.user.findFirst({
+    where: { OR: [{ email: identifier }, { phone: identifier }] },
+    select: {
+      id: true,
+      role: true,
+      password: true,
+      isActive: true,
+      totpEnabledAt: true,
+      anonymizedAt: true,
+    },
+  })
+
+  if (compteAdmin?.role === 'admin') {
+    const messageGenerique = 'Email ou mot de passe incorrect.'
+    if (
+      !compteAdmin.isActive ||
+      compteAdmin.totpEnabledAt === null ||
+      compteAdmin.anonymizedAt !== null
+    ) {
+      await verifyPassword(password, compteAdmin.password)
+      recordAttempt(idKey)
+      recordAttempt(ipKey)
+      return { message: messageGenerique }
+    }
+
+    const motDePasseValide = await verifyPassword(password, compteAdmin.password)
+    if (!motDePasseValide) {
+      recordAttempt(idKey)
+      recordAttempt(ipKey)
+      return { message: messageGenerique }
+    }
+
+    resetAttempts(idKey)
+    const { token } = await creerChallengeAdmin(compteAdmin.id)
+    const cookieStore = await cookies()
+    cookieStore.set(COOKIE_CHALLENGE_ADMIN, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: Math.floor(ADMIN_CHALLENGE_TTL_MS / 1000),
+    })
+    redirect('/login/2fa')
   }
 
   try {

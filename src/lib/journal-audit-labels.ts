@@ -6,6 +6,9 @@
 // ACTIONS_AUDIT couvre en plus les actions historiques M7/M8 lues via la vue.
 // ---------------------------------------------------------------------------
 
+/** Acteur conventionnel des actions CLI sans session admin (jamais un user id). */
+export const ACTEUR_AUDIT_SYSTEME = 0
+
 export const SOURCES_AUDIT = [
   'generique',
   'candidatures',
