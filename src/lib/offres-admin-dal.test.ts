@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Prisma } from '@prisma/client'
 
 import {
+  OFFRES_ADMIN_PAR_PAGE,
   SELECT_OFFRE_ADMIN,
+  clauseOffresAdmin,
   compterOffresPourAdmin,
+  listerOffresAdmin,
   listerOffresPourAdmin,
   type OffreAdminLigne,
 } from './offres-admin-dal'
@@ -138,6 +141,78 @@ describe('listerOffresPourAdmin', () => {
 
     expect(lignes[0]?.entreprise).toBeNull()
     expect(lignes[0]?.categorie).toBeNull()
+  })
+})
+
+describe('listerOffresAdmin (filtres et pagination)', () => {
+  it('compte et liste avec le MÊME where, page 1 par défaut', async () => {
+    offreCount.mockResolvedValue(21)
+
+    const resultat = await listerOffresAdmin({ q: '  ACME  ', statut: 'publiee' })
+
+    expect(offreCount).toHaveBeenCalledWith({
+      where: {
+        deletedAt: null,
+        OR: [
+          { titre: { contains: 'ACME' } },
+          { entreprise: { nom: { contains: 'ACME' } } },
+        ],
+        statut: 'publiee',
+      },
+    })
+    expect(offreFindMany).toHaveBeenCalledTimes(1)
+    expect(offreFindMany.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        deletedAt: null,
+        OR: [
+          { titre: { contains: 'ACME' } },
+          { entreprise: { nom: { contains: 'ACME' } } },
+        ],
+        statut: 'publiee',
+      },
+      skip: 0,
+      take: OFFRES_ADMIN_PAR_PAGE,
+      select: SELECT_OFFRE_ADMIN,
+    })
+    expect(resultat).toMatchObject({
+      total: 21,
+      page: 1,
+      taille: OFFRES_ADMIN_PAR_PAGE,
+      pages: 2,
+    })
+  })
+
+  it('filtre « expirée » avec la frontière de Douala', async () => {
+    const where = clauseOffresAdmin({ statut: 'expiree' })
+
+    expect(where).toEqual({
+      deletedAt: null,
+      statut: 'publiee',
+      dateExpiration: { lt: new Date('2026-10-07T23:00:00.000Z') },
+    })
+  })
+
+  it('borne la page et applique skip/take', async () => {
+    offreCount.mockResolvedValue(100)
+
+    const resultat = await listerOffresAdmin({ page: 3, taille: 10 })
+
+    expect(offreFindMany.mock.calls[0]?.[0]).toMatchObject({ skip: 20, take: 10 })
+    expect(resultat.page).toBe(3)
+    expect(resultat.pages).toBe(10)
+  })
+
+  it('ignore un statut hors catalogue et une taille hors bornes', async () => {
+    offreCount.mockResolvedValue(1)
+
+    await listerOffresAdmin({
+      statut: 'statut_inconnu' as never,
+      page: 0,
+      taille: 500,
+    })
+
+    expect(offreCount).toHaveBeenCalledWith({ where: { deletedAt: null } })
+    expect(offreFindMany.mock.calls[0]?.[0]).toMatchObject({ skip: 0, take: 100 })
   })
 })
 

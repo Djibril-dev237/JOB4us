@@ -3,6 +3,7 @@ import 'server-only'
 import type { Prisma, StatutOffre } from '@prisma/client'
 
 import { dateCouranteDouala, minuitDouala } from '@/lib/douala'
+import { VALEURS_FILTRE_STATUT } from '@/lib/offres-labels'
 import { prisma } from '@/lib/prisma'
 
 // ─── Accès aux données de l'espace admin minimal des offres (M6, D5) ──────────
@@ -76,6 +77,86 @@ export async function listerOffresPourAdmin(): Promise<OffreAdminLigne[]> {
 }
 
 /** Compteurs des 3 cartes d'en-tête de la page admin. */
+export const OFFRES_ADMIN_PAR_PAGE = 20
+
+export interface FiltresOffresAdmin {
+  q?: string
+  /** Statut stocké, ou `expiree` pour la vue dérivée des publiées échues. */
+  statut?: StatutOffre | 'expiree'
+  page?: number
+  taille?: number
+}
+
+export interface ResultatOffresAdmin {
+  lignes: OffreAdminLigne[]
+  total: number
+  page: number
+  taille: number
+  pages: number
+}
+
+/** WHERE unique de la liste filtrée et de son comptage. */
+export function clauseOffresAdmin(
+  filtres: FiltresOffresAdmin,
+): Prisma.OffreWhereInput {
+  const where: Prisma.OffreWhereInput = { deletedAt: null }
+  const q = filtres.q?.trim()
+  if (q !== undefined && q !== '') {
+    where.OR = [
+      { titre: { contains: q } },
+      { entreprise: { nom: { contains: q } } },
+    ]
+  }
+  if (filtres.statut === 'expiree') {
+    where.statut = 'publiee'
+    where.dateExpiration = { lt: minuitDouala(dateCouranteDouala()) }
+  } else if (
+    filtres.statut !== undefined &&
+    VALEURS_FILTRE_STATUT.includes(filtres.statut)
+  ) {
+    where.statut = filtres.statut
+  }
+  return where
+}
+
+function pageBornee(page: number | undefined): number {
+  return Number.isFinite(page) ? Math.max(1, Math.trunc(page as number)) : 1
+}
+
+function tailleBornee(taille: number | undefined): number {
+  return Number.isFinite(taille)
+    ? Math.min(100, Math.max(1, Math.trunc(taille as number)))
+    : OFFRES_ADMIN_PAR_PAGE
+}
+
+/** Liste paginée + comptage du même WHERE (2 requêtes en parallèle). */
+export async function listerOffresAdmin(
+  filtres: FiltresOffresAdmin = {},
+): Promise<ResultatOffresAdmin> {
+  const page = pageBornee(filtres.page)
+  const taille = tailleBornee(filtres.taille)
+  const where = clauseOffresAdmin(filtres)
+
+  const [total, lignes] = await Promise.all([
+    prisma.offre.count({ where }),
+    prisma.offre.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: (page - 1) * taille,
+      take: taille,
+      select: SELECT_OFFRE_ADMIN,
+    }),
+  ])
+
+  return {
+    lignes,
+    total,
+    page,
+    taille,
+    pages: Math.max(1, Math.ceil(total / taille)),
+  }
+}
+
 export interface ComptesOffresAdmin {
   /** Offres vivantes, tous statuts confondus. */
   total: number

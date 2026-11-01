@@ -156,7 +156,13 @@ export function messageMaj(cle: string | null | undefined): string | null {
 // ou absente → aucun bandeau, jamais de texte non contrôlé affiché depuis
 // l'URL. Échec de propriété (offre étrangère) = 404, jamais `?erreur=`.
 
-export type CleErreurTransition = 'statut' | 'date' | 'quota' | 'limite'
+export type CleErreurTransition =
+  | 'statut'
+  | 'date'
+  | 'quota'
+  | 'limite'
+  | 'forme'
+  | 'inconnue'
 
 export const MESSAGES_ERREUR_TRANSITION: Record<CleErreurTransition, string> = {
   /** Transition impossible depuis le statut courant (ou offre expirée). */
@@ -167,6 +173,10 @@ export const MESSAGES_ERREUR_TRANSITION: Record<CleErreurTransition, string> = {
   quota: `Nombre maximum d’offres publiées atteint (${OFFRES_ACTIVES_MAX}).`,
   /** D6 : seau de 10 créations/heure (création ET duplication). */
   limite: 'Trop de créations récentes : réessayez dans une heure.',
+  /** Formulaire admin incomplet (motif absent ou hors catalogue). */
+  forme: 'Le formulaire est incomplet ou invalide.',
+  /** Panne d’écriture ou d’audit : aucune mutation n’a été appliquée. */
+  inconnue: 'La mise à jour de l’offre a échoué.',
 }
 
 export function messageErreurTransition(

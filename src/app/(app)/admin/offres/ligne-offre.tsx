@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { releverOffre, suspendreOffre } from '@/app/actions/offres-admin'
 import type { OffreAdminLigne } from '@/lib/offres-admin-dal'
 import { dateRelativeFr } from '@/lib/dates'
+import { OPTIONS_MOTIF_SUSPENSION_OFFRE } from '@/lib/moderation-labels'
 import { statutAffiche } from '@/lib/offres-labels'
 
 // ─── Ligne de la liste admin des offres (M6, D5) ─────────────────────────────
@@ -95,8 +96,25 @@ export function LigneOffreAdmin({ offre, maintenant }: LigneOffreAdminProps) {
       {/* Un seul formulaire par ligne : l'offre suit via l'id caché.
           Noms de contrôles identiques d'une ligne à l'autre : le contexte
           du titre reste explicite pour un lecteur d'écran en liste. */}
-      <form action={suspendue ? releverOffre : suspendreOffre} className="shrink-0">
+      <form
+        action={suspendue ? releverOffre : suspendreOffre}
+        className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto"
+      >
         <input type="hidden" name="id" value={offre.id} />
+        <select
+          name="motif"
+          aria-label={
+            suspendue ? 'Motif de la réactivation' : 'Motif de la suspension'
+          }
+          defaultValue={suspendue ? 'autre' : 'qualite'}
+          className="h-9 min-w-0 grow rounded-sm border-[1.5px] border-line bg-surface px-2 text-sm text-ink transition-colors duration-fast focus:border-brand sm:grow-0"
+        >
+          {OPTIONS_MOTIF_SUSPENSION_OFFRE.map((option) => (
+            <option key={option.valeur} value={option.valeur}>
+              {option.libelle}
+            </option>
+          ))}
+        </select>
         {suspendue ? (
           <button
             type="submit"

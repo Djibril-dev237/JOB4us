@@ -4,10 +4,20 @@ import { BandeauAdmin } from '@/components/admin/bandeau-admin'
 import { CarteStatistique } from '@/components/admin/carte-statistique'
 import { EnTeteAdmin } from '@/components/admin/en-tete-admin'
 import { EtatVideAdmin } from '@/components/admin/etat-vide-admin'
+import { Pagination } from '@/components/candidatures/pagination'
 import { IconBriefcase } from '@/components/icons'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { requireAdmin } from '@/lib/dal'
-import { compterOffresPourAdmin, listerOffresPourAdmin } from '@/lib/offres-admin-dal'
-import { messageErreurTransition, messageMaj } from '@/lib/offres-labels'
+import { compterOffresPourAdmin, listerOffresAdmin } from '@/lib/offres-admin-dal'
+import {
+  messageErreurTransition,
+  messageMaj,
+  OPTIONS_FILTRE_STATUT,
+  VALEURS_FILTRE_STATUT,
+  type ValeurFiltreStatut,
+} from '@/lib/offres-labels'
 
 import { LigneOffreAdmin } from './ligne-offre'
 
@@ -36,6 +46,15 @@ export const metadata: Metadata = {
   title: 'Gestion des offres',
 }
 
+function paramUnique(valeur: string | string[] | undefined): string | null {
+  return typeof valeur === 'string' ? valeur : null
+}
+
+function pageCourante(valeur: string | null): number {
+  const entier = Math.trunc(Number(valeur ?? 1))
+  return Number.isFinite(entier) ? Math.max(1, entier) : 1
+}
+
 export default async function PageAdminOffres({
   searchParams,
 }: PageProps<'/admin/offres'>) {
@@ -44,15 +63,26 @@ export default async function PageAdminOffres({
   // `searchParams` peut porter des tableaux (?maj=a&maj=b) : ces clés sont
   // alors ignorées, cohérent avec le fail-closed des deux helpers.
   const params = await searchParams
-  const cleMaj = typeof params.maj === 'string' ? params.maj : undefined
-  const cleErreur = typeof params.erreur === 'string' ? params.erreur : undefined
+  const cleMaj = paramUnique(params.maj) ?? undefined
+  const cleErreur = paramUnique(params.erreur) ?? undefined
   const succes = messageMaj(cleMaj)
   const echec = messageErreurTransition(cleErreur)
 
-  const [lignes, comptes] = await Promise.all([
-    listerOffresPourAdmin(),
+  const q = (paramUnique(params.q) ?? '').trim().slice(0, 100)
+  const statutBrut = paramUnique(params.statut)
+  const statut =
+    statutBrut !== null &&
+    statutBrut !== '' &&
+    VALEURS_FILTRE_STATUT.includes(statutBrut as ValeurFiltreStatut)
+      ? (statutBrut as Exclude<ValeurFiltreStatut, ''>)
+      : undefined
+  const page = pageCourante(paramUnique(params.page))
+
+  const [resultat, comptes] = await Promise.all([
+    listerOffresAdmin({ q, statut, page }),
     compterOffresPourAdmin(),
   ])
+  const lignes = resultat.lignes
 
   // Frontière d'affichage unique : badge « expirée » et dates relatives
   // partagent le même instant pour toute la liste (D12 : dérivé à lecture).
@@ -64,6 +94,35 @@ export default async function PageAdminOffres({
         titre="Gestion des offres"
         description={`${comptes.total} offre(s) au total`}
       />
+
+      <form
+        method="get"
+        className="grid gap-3 rounded-md border border-line bg-surface p-4 shadow-card sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_12rem_auto]"
+      >
+        <Input
+          label="Rechercher un titre ou une entreprise"
+          name="q"
+          type="search"
+          defaultValue={q}
+          maxLength={100}
+        />
+        <Select
+          label="Statut"
+          name="statut"
+          defaultValue={statut ?? ''}
+          options={OPTIONS_FILTRE_STATUT.map((option) => ({
+            value: option.valeur,
+            label: option.libelle,
+          }))}
+        />
+        <Button type="submit" className="self-end">
+          Filtrer
+        </Button>
+      </form>
+
+      <p className="text-sm text-ink-muted">
+        {resultat.total} offre(s) correspondant aux filtres
+      </p>
 
       {succes !== null || echec !== null ? (
         <div className="flex flex-col gap-2">
@@ -97,6 +156,17 @@ export default async function PageAdminOffres({
           ))
         )}
       </ul>
+
+      <Pagination
+        page={resultat.page}
+        pages={resultat.pages}
+        chemin="/admin/offres"
+        parametres={{
+          q: q === '' ? undefined : q,
+          statut,
+        }}
+        ariaLabel="Pagination des offres administrateur"
+      />
     </div>
   )
 }

@@ -148,9 +148,9 @@ describe('politique D4 et bandeaux ?maj=', () => {
 })
 
 describe('MESSAGES_ERREUR_TRANSITION (bandeaux ?erreur=)', () => {
-  it('expose exactement les 4 clés de refus, texte non vide', () => {
+  it('expose exactement les 6 clés de refus, texte non vide', () => {
     expect(Object.keys(MESSAGES_ERREUR_TRANSITION).sort()).toEqual(
-      ['date', 'limite', 'quota', 'statut'].sort(),
+      ['date', 'forme', 'inconnue', 'limite', 'quota', 'statut'].sort(),
     )
     for (const texte of Object.values(MESSAGES_ERREUR_TRANSITION)) {
       expect(texte.length).toBeGreaterThan(0)
@@ -166,7 +166,9 @@ describe('MESSAGES_ERREUR_TRANSITION (bandeaux ?erreur=)', () => {
     expect(messageErreurTransition('statut')).toBe(
       'Cette action n’est plus disponible pour cette offre.',
     )
-    expect(messageErreurTransition('inconnue')).toBeNull()
+    expect(messageErreurTransition('inconnue')).toBe(
+      'La mise à jour de l’offre a échoué.',
+    )
     expect(messageErreurTransition('<script>')).toBeNull()
     expect(messageErreurTransition(null)).toBeNull()
     expect(messageErreurTransition(undefined)).toBeNull()

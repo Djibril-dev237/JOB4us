@@ -10,16 +10,17 @@ import { notFound, redirect } from 'next/navigation'
 
 import { releverOffre, suspendreOffre } from './offres-admin'
 
-// ─── Tests des actions admin T8/T9 (M6, Vague 2) ─────────────────────────────
+// ─── Tests des actions admin T8/T9 (M10) ────────────────────────────────────
 // Critères vérifiés ici :
-// - ordre imposé : verifyRole('admin') en TOUT PREMIER, avant la moindre
-//   requête (rôle insuffisant → aucune offre lue, aucune écriture) ;
+// - ordre imposé : requireAdmin() en TOUT PREMIER, avant la moindre requête ;
 // - doctrine 404 : id absent/invalide ET offre inexistante ou supprimée =
 //   notFound() sans jamais un redirect ni un code distinct ;
 // - compare-and-set : le statut source vit dans le `where` de l'updateMany,
 //   count 0 → `?erreur=statut` (jamais `?maj=`) ;
-// - anti mass-assignment : `statut`, `entrepriseId`, `deletedAt` forges
-//   dans le FormData n'ont AUCUN effet — le data vient de la matrice seule.
+// - motif fermé obligatoire : un motif absent ou forgé est refusé ;
+// - audit et mutation dans la MÊME transaction, avec le motif et la note ;
+// - anti mass-assignment : `statut`, `entrepriseId`, `deletedAt` forgés
+//   dans le FormData n'ont AUCUN effet.
 // ---------------------------------------------------------------------------
 
 interface ArgsFindFirst {
@@ -32,9 +33,14 @@ interface ArgsUpdateMany {
   data?: Prisma.OffreUpdateManyMutationInput
 }
 
-const { offreFindFirst, offreUpdateMany } = vi.hoisted(() => ({
+interface Tx {
+  offre: { updateMany: typeof offreUpdateMany }
+}
+
+const { offreFindFirst, offreUpdateMany, transaction } = vi.hoisted(() => ({
   offreFindFirst: vi.fn<(args: ArgsFindFirst) => Promise<unknown>>(),
   offreUpdateMany: vi.fn<(args: ArgsUpdateMany) => Promise<{ count: number }>>(),
+  transaction: vi.fn<(callback: (tx: Tx) => Promise<unknown>) => Promise<unknown>>(),
 }))
 
 vi.mock('@/lib/dal', () => ({
@@ -49,7 +55,8 @@ vi.mock('@/lib/journal-audit', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    offre: { findFirst: offreFindFirst, updateMany: offreUpdateMany },
+    offre: { findFirst: offreFindFirst },
+    $transaction: transaction,
   },
 }))
 
@@ -71,9 +78,7 @@ vi.mock('@/lib/notifications-evenements', () => ({
 }))
 
 // Dans Next, redirect() et notFound() sont des exceptions de contrôle :
-// les mocks lèvent aussi, sinon l'exécution continuerait après le verdict
-// (deux redirect sur le refus T8, écriture après un 404…) et le test ne
-// pourrait plus dire quel chemin a été pris.
+// les mocks lèvent aussi, sinon l'exécution continuerait après le verdict.
 vi.mock('next/navigation', () => ({
   redirect: vi.fn(() => {
     throw new Error('NEXT_REDIRECT')
@@ -102,26 +107,32 @@ beforeEach(() => {
   vi.mocked(reauthAdminValide).mockResolvedValue(true)
   offreFindFirst.mockResolvedValue(OFFRE_VIVANTE)
   offreUpdateMany.mockResolvedValue({ count: 1 })
+  transaction.mockImplementation(async (callback) =>
+    callback({ offre: { updateMany: offreUpdateMany } }),
+  )
 })
 
 describe('suspendreOffre (T8)', () => {
   it('CAS `statut in` exact puis redirection ?maj=suspendue', async () => {
-    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(
+      suspendreOffre(formOf({ id: '42', motif: 'qualite' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
 
     expect(requireAdmin).toHaveBeenCalledTimes(1)
-    // Existence + suppression logique dans LA même lecture, sans périmètre
-    // d'entreprise (l'admin voit toutes les offres).
     expect(offreFindFirst).toHaveBeenCalledTimes(1)
     expect(offreFindFirst.mock.calls[0]?.[0].where).toEqual({ id: 42, deletedAt: null })
 
     expect(offreUpdateMany).toHaveBeenCalledTimes(1)
     expect(offreUpdateMany.mock.calls[0]?.[0]).toEqual({
-      where: { id: 42, deletedAt: null, statut: { in: ['publiee', 'brouillon', 'cloturee'] } },
+      where: {
+        id: 42,
+        deletedAt: null,
+        statut: { in: ['publiee', 'brouillon', 'cloturee'] },
+      },
       data: { statut: 'suspendue' },
     })
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?maj=suspendue')
-    // Événement M9 (hook branché, résolveur stubbé ici) : la suspension retire l'offre de la visibilité.
     expect(offreIndisponible).toHaveBeenCalledTimes(1)
     expect(offreIndisponible).toHaveBeenCalledWith({ offreId: 42 })
   })
@@ -129,18 +140,36 @@ describe('suspendreOffre (T8)', () => {
   it('refus (count 0 : déjà suspendue ou course) → ?erreur=statut, jamais ?maj=', async () => {
     offreUpdateMany.mockResolvedValue({ count: 0 })
 
-    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(
+      suspendreOffre(formOf({ id: '42', motif: 'qualite' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
 
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?erreur=statut')
-    // Aucune suspension → aucun événement.
     expect(offreIndisponible).not.toHaveBeenCalled()
+  })
+
+  it('motif absent ou hors catalogue → ?erreur=forme, aucune lecture', async () => {
+    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    expect(redirect).toHaveBeenCalledWith('/admin/offres?erreur=forme')
+    expect(offreFindFirst).not.toHaveBeenCalled()
+    expect(offreUpdateMany).not.toHaveBeenCalled()
+
+    vi.mocked(redirect).mockClear()
+    await expect(
+      suspendreOffre(formOf({ id: '42', motif: 'motif_invente' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
+    expect(redirect).toHaveBeenCalledWith('/admin/offres?erreur=forme')
+    expect(offreFindFirst).not.toHaveBeenCalled()
+    expect(offreUpdateMany).not.toHaveBeenCalled()
   })
 })
 
 describe('releverOffre (T9)', () => {
   it('CAS `statut: suspendue` → brouillon, puis redirection ?maj=levee', async () => {
-    await expect(releverOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(
+      releverOffre(formOf({ id: '42', motif: 'autre' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
 
     expect(requireAdmin).toHaveBeenCalledTimes(1)
     expect(offreUpdateMany).toHaveBeenCalledTimes(1)
@@ -150,14 +179,15 @@ describe('releverOffre (T9)', () => {
     })
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?maj=levee')
-    // Levée = brouillon : rien n'est de nouveau visible → AUCUN événement.
     expect(offreIndisponible).not.toHaveBeenCalled()
   })
 
   it('refus (count 0 : offre relevée entre-temps) → ?erreur=statut', async () => {
     offreUpdateMany.mockResolvedValue({ count: 0 })
 
-    await expect(releverOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(
+      releverOffre(formOf({ id: '42', motif: 'autre' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
 
     expect(redirect).toHaveBeenCalledTimes(1)
     expect(redirect).toHaveBeenCalledWith('/admin/offres?erreur=statut')
@@ -176,7 +206,9 @@ describe('doctrine 404 (jamais de 403, jamais de redirect)', () => {
 
   it('id non entier positif → notFound, aucune requête', async () => {
     for (const idForge of ['abc', '12.5', '-3', '0', '', '   ', '1e20']) {
-      await expect(releverOffre(formOf({ id: idForge }))).rejects.toThrow('NEXT_NOT_FOUND')
+      await expect(
+        releverOffre(formOf({ id: idForge, motif: 'autre' })),
+      ).rejects.toThrow('NEXT_NOT_FOUND')
     }
 
     expect(offreFindFirst).not.toHaveBeenCalled()
@@ -185,10 +217,11 @@ describe('doctrine 404 (jamais de 403, jamais de redirect)', () => {
   })
 
   it('offre inexistante ou supprimée → notFound ET PAS de redirect', async () => {
-    // `deletedAt: null` dans le where : supprimée logiquement = même 404.
     offreFindFirst.mockResolvedValue(null)
 
-    await expect(suspendreOffre(formOf({ id: '999' }))).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(
+      suspendreOffre(formOf({ id: '999', motif: 'qualite' })),
+    ).rejects.toThrow('NEXT_NOT_FOUND')
 
     expect(offreFindFirst).toHaveBeenCalledTimes(1)
     expect(offreFindFirst.mock.calls[0]?.[0].where).toEqual({ id: 999, deletedAt: null })
@@ -198,11 +231,12 @@ describe('doctrine 404 (jamais de 403, jamais de redirect)', () => {
 })
 
 describe('sécurité payload (matrice seule)', () => {
-  it('ignore statut/entrepriseId/deletedAt/slug forges sur T8', async () => {
+  it('ignore statut/entrepriseId/deletedAt/slug forgés sur T8', async () => {
     await expect(
       suspendreOffre(
         formOf({
           id: '42',
+          motif: 'qualite',
           statut: 'publiee',
           entrepriseId: '9',
           deletedAt: '2020-01-01',
@@ -216,8 +250,6 @@ describe('sécurité payload (matrice seule)', () => {
     for (const cleInterdite of ['entrepriseId', 'deletedAt', 'slug']) {
       expect(appel?.data).not.toHaveProperty(cleInterdite)
     }
-    // Le where reste piloté par la matrice : id de la session formée,
-    // deletedAt null et contrainte de statut — aucune clé venue du payload.
     expect(appel?.where).toEqual({
       id: 42,
       deletedAt: null,
@@ -226,9 +258,16 @@ describe('sécurité payload (matrice seule)', () => {
     expect(redirect).toHaveBeenCalledWith('/admin/offres?maj=suspendue')
   })
 
-  it('ignore un statut forge sur T9 (la cible reste brouillon)', async () => {
+  it('ignore un statut forgé sur T9 (la cible reste brouillon)', async () => {
     await expect(
-      releverOffre(formOf({ id: '42', statut: 'publiee', entrepriseId: '9' })),
+      releverOffre(
+        formOf({
+          id: '42',
+          motif: 'autre',
+          statut: 'publiee',
+          entrepriseId: '9',
+        }),
+      ),
     ).rejects.toThrow('NEXT_REDIRECT')
 
     expect(offreUpdateMany.mock.calls[0]?.[0].data).toEqual({ statut: 'brouillon' })
@@ -236,11 +275,13 @@ describe('sécurité payload (matrice seule)', () => {
   })
 })
 
-describe('rôles et réauthentification', () => {
+describe('rôles, réauthentification et audit', () => {
   it('requireAdmin en premier : non-admin → 404 avant toute requête (T8)', async () => {
     vi.mocked(requireAdmin).mockRejectedValueOnce(new Error('NEXT_NOT_FOUND'))
 
-    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(
+      suspendreOffre(formOf({ id: '42', motif: 'qualite' })),
+    ).rejects.toThrow('NEXT_NOT_FOUND')
 
     expect(requireAdmin).toHaveBeenCalledTimes(1)
     expect(offreFindFirst).not.toHaveBeenCalled()
@@ -251,7 +292,9 @@ describe('rôles et réauthentification', () => {
   it('requireAdmin en premier : non-admin → 404 avant toute requête (T9)', async () => {
     vi.mocked(requireAdmin).mockRejectedValueOnce(new Error('NEXT_NOT_FOUND'))
 
-    await expect(releverOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_NOT_FOUND')
+    await expect(
+      releverOffre(formOf({ id: '42', motif: 'autre' })),
+    ).rejects.toThrow('NEXT_NOT_FOUND')
 
     expect(requireAdmin).toHaveBeenCalledTimes(1)
     expect(offreFindFirst).not.toHaveBeenCalled()
@@ -262,17 +305,27 @@ describe('rôles et réauthentification', () => {
   it('sans réauthentification : redirection vers /admin/reauth avant lecture', async () => {
     vi.mocked(reauthAdminValide).mockResolvedValueOnce(false)
 
-    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(
+      suspendreOffre(formOf({ id: '42', motif: 'qualite' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
 
     expect(redirect).toHaveBeenCalledWith('/admin/reauth?retour=%2Fadmin%2Foffres')
     expect(offreFindFirst).not.toHaveBeenCalled()
     expect(offreUpdateMany).not.toHaveBeenCalled()
   })
 
-  it('audit écrit AVANT la mutation (T8)', async () => {
-    // Le mock de `redirect` lève : la mutation est atteinte, l'audit aussi.
-    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+  it('audit et mutation dans la même transaction, avec motif et note', async () => {
+    await expect(
+      suspendreOffre(
+        formOf({
+          id: '42',
+          motif: 'fraude',
+          noteInterne: 'Compte lié à plusieurs plaintes.',
+        }),
+      ),
+    ).rejects.toThrow('NEXT_REDIRECT')
 
+    expect(transaction).toHaveBeenCalledTimes(1)
     expect(consignerAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -280,10 +333,23 @@ describe('rôles et réauthentification', () => {
         action: 'suspension_offre',
         cibleType: 'offre',
         cibleId: 42,
+        motif: 'fraude',
+        commentaire: 'Compte lié à plusieurs plaintes.',
       }),
     )
-    expect(vi.mocked(consignerAudit).mock.invocationCallOrder[0]).toBeLessThan(
-      offreUpdateMany.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    expect(vi.mocked(consignerAudit).mock.invocationCallOrder[0]).toBeGreaterThan(
+      offreUpdateMany.mock.invocationCallOrder[0] ?? 0,
     )
+  })
+
+  it('une erreur d’audit annule la mutation (transaction rejetée)', async () => {
+    vi.mocked(consignerAudit).mockRejectedValueOnce(new Error('audit indisponible'))
+
+    await expect(
+      suspendreOffre(formOf({ id: '42', motif: 'qualite' })),
+    ).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(redirect).toHaveBeenCalledWith('/admin/offres?erreur=inconnue')
+    expect(offreIndisponible).not.toHaveBeenCalled()
   })
 })
