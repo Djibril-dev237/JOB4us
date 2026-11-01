@@ -26,7 +26,7 @@ import {
   type DecisionSignalement,
 } from '@/lib/moderation-labels'
 
-import { Bandeau } from '../bandeau'
+import { BandeauAdmin } from '@/components/admin/bandeau-admin'
 
 // ─── Formulaires du détail d'un signalement (M10) ────────────────────────────
 //
@@ -53,7 +53,7 @@ function MessageRetour({ retour, cheminRetour }: { retour: Retour; cheminRetour:
   if (retour.type === 'reauth') {
     return (
       <div className="min-w-0 space-y-2">
-        <Bandeau variante="erreur" message={retour.message} />
+        <BandeauAdmin variante="erreur" message={retour.message} />
         <Link href={lienReauth(cheminRetour)} className={buttonClassName('secondary', 'sm')}>
           {TEXTES_MODERATION.reauthLien}
         </Link>
@@ -61,7 +61,7 @@ function MessageRetour({ retour, cheminRetour }: { retour: Retour; cheminRetour:
     )
   }
   return (
-    <Bandeau
+    <BandeauAdmin
       variante={retour.type === 'succes' || retour.type === 'deja' ? 'succes' : 'erreur'}
       message={retour.message}
     />

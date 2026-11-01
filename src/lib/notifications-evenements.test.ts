@@ -7,6 +7,7 @@ import { emettreNotification } from './notifications-emission'
 import {
   notifierCandidatureRecue,
   notifierCandidatureRetiree,
+  notifierDecisionModeration,
   notifierMessageEnvoye,
   notifierOffreIndisponible,
   notifierOffrePubliee,
@@ -261,10 +262,14 @@ describe('notifierMessageEnvoye (autre participant, jamais soi-même)', () => {
 
 // ─── signalementRecu ────────────────────────────────────────────────────────
 
-describe('notifierSignalementRecu (chaque admin, modération)', () => {
-  it('notifie CHAQUE admin, refId = messageId, lien admin', async () => {
+describe('notifierSignalementRecu (chaque admin actif, modération)', () => {
+  it('notifie CHAQUE admin actif, refId = messageId, lien admin', async () => {
     await notifierSignalementRecu({ messageId: 9, auteurId: 10 })
 
+    expect(userFindMany).toHaveBeenCalledWith({
+      where: { role: 'admin', isActive: true },
+      select: { id: true },
+    })
     expect(emettre).toHaveBeenCalledTimes(2)
     expect(emettre.mock.calls.map((appel) => appel[0]?.destinataireId)).toEqual([1, 2])
     for (const appel of emettre.mock.calls) {
@@ -272,6 +277,45 @@ describe('notifierSignalementRecu (chaque admin, modération)', () => {
       expect(appel[0]?.refId).toBe(9)
       expect(appel[0]?.lien).toBe('/admin/signalements')
     }
+  })
+
+  it('aucun admin actif : aucune notification', async () => {
+    userFindMany.mockResolvedValue([])
+
+    await notifierSignalementRecu({ messageId: 9, auteurId: 10 })
+
+    expect(emettre).not.toHaveBeenCalled()
+  })
+})
+
+// ─── moderation ─────────────────────────────────────────────────────────────
+
+describe('notifierDecisionModeration (auteur du signalement, décision fermée)', () => {
+  it('notifie l’auteur avec la décision, refId = signalementId', async () => {
+    await notifierDecisionModeration({
+      signalementId: 7,
+      auteurId: 10,
+      decision: 'masquage',
+    })
+
+    expect(emettre).toHaveBeenCalledWith({
+      destinataireId: 10,
+      type: 'moderation',
+      refId: 7,
+      lien: '/notifications',
+      variables: { type: 'moderation', decision: 'masquage' },
+    })
+  })
+
+  it('aucun contenu privé dans le payload', async () => {
+    await notifierDecisionModeration({
+      signalementId: 7,
+      auteurId: 10,
+      decision: 'suspension',
+    })
+
+    const payload = emettre.mock.calls[0]?.[0]
+    expect(payload?.variables).toEqual({ type: 'moderation', decision: 'suspension' })
   })
 })
 

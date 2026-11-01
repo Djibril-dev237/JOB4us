@@ -79,3 +79,27 @@ describe('accès aux offres publiques (M5)', () => {
     })
   })
 })
+
+// ─── Navigation admin M10 ────────────────────────────────────────────────────
+// Les écrans Entreprises et Catégories ne font pas partie du périmètre M10 :
+// leurs liens morts sont retirés. La modération regroupe la file de
+// signalements et le journal d'audit, conformément à l'Étape 3.
+
+describe('navigation admin M10', () => {
+  const hrefsAdmin = [
+    ...NAV_SECONDARY.admin.map((item) => item.href),
+    ...SIDEBAR_NAV.admin.flatMap((section) => section.items.map((item) => item.href)),
+  ]
+
+  it('ne contient plus les liens morts Entreprises et Catégories', () => {
+    expect(hrefsAdmin).not.toContain('/admin/entreprises')
+    expect(hrefsAdmin).not.toContain('/admin/categories')
+  })
+
+  it('expose la modération et le journal d’audit', () => {
+    expect(hrefsAdmin).toContain('/admin/signalements')
+    expect(hrefsAdmin).toContain('/admin/audit')
+    expect(hrefsAdmin).toContain('/admin/utilisateurs')
+    expect(hrefsAdmin).toContain('/admin/statistiques')
+  })
+})

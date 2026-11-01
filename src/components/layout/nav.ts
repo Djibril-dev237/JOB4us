@@ -43,7 +43,6 @@ export const NAV_SECONDARY: Record<Role, NavItem[]> = {
     { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
   ],
   admin: [
-    { label: 'Catégories', href: '/admin/categories' },
     { label: 'Statistiques', href: '/admin/statistiques' },
     { label: 'Notifications', href: '/notifications' },
     { label: TEXTES.titrePreferences, href: '/notifications/preferences' },
@@ -134,20 +133,21 @@ export const SIDEBAR_NAV: Record<Role, SidebarSection[]> = {
       items: [
         { label: 'Utilisateurs', href: '/admin/utilisateurs' },
         { label: "Offres d'emploi", href: '/admin/offres' },
-        { label: 'Entreprises', href: '/admin/entreprises' },
-        { label: 'Catégories', href: '/admin/categories' },
         { label: 'Statistiques', href: '/admin/statistiques' },
       ],
     },
     {
-      title: 'Communication',
+      title: 'Modération',
       items: [
-        // Modération M8 : file des signalements ouverts — l'admin n'accède
-        // aux conversations QUE depuis un signalement (Étape 2 : aucune
-        // navigation libre de boîtes, toute consultation journalisée).
+        // File des signalements ouverts : l'admin n'accède aux conversations
+        // QUE depuis un signalement (aucune navigation libre de boîtes).
         { label: 'Signalements', href: '/admin/signalements' },
-        { label: 'Notifications', href: '/notifications' },
+        { label: "Journal d'audit", href: '/admin/audit' },
       ],
+    },
+    {
+      title: 'Communication',
+      items: [{ label: 'Notifications', href: '/notifications' }],
     },
     {
       title: 'Compte',

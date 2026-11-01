@@ -14,7 +14,8 @@ import { libelleDecision, libelleMotif } from '@/lib/moderation-labels'
 import { prisma } from '@/lib/prisma'
 
 import { FORMATEUR_DATE, FORMATEUR_DATE_HEURE } from '../affichage'
-import { Bandeau } from '../bandeau'
+import { BandeauAdmin } from '@/components/admin/bandeau-admin'
+import { EnTeteAdmin } from '@/components/admin/en-tete-admin'
 
 import { AccesSignalementForm, DecisionSignalementForm, RetablirMessageForm } from './formulaires'
 
@@ -172,11 +173,12 @@ export default async function PageSignalement({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <h1 className="text-2xl font-bold tracking-tight text-ink">
-        {TEXTES.titreSignalements}
-      </h1>
+      <EnTeteAdmin
+        titre={TEXTES.titreSignalements}
+        description="Détail d’un signalement et accès encadré au contenu privé."
+      />
 
-      {acces ? <Bandeau variante="info" message={TEXTES.moderationLue} /> : null}
+      {acces ? <BandeauAdmin variante="info" message={TEXTES.moderationLue} /> : null}
 
       <Card>
         <div className="flex flex-wrap items-center gap-2">

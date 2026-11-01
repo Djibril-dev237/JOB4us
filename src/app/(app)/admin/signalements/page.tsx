@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
 import type { StatutSignalement } from '@prisma/client'
-import Link from 'next/link'
 
+import { EnTeteAdmin } from '@/components/admin/en-tete-admin'
+import { EtatVideAdmin } from '@/components/admin/etat-vide-admin'
+import { FiltresAdmin } from '@/components/admin/filtres-admin'
 import { Pagination } from '@/components/candidatures/pagination'
 import { IconFlag } from '@/components/icons'
 import { requireAdmin } from '@/lib/dal'
@@ -41,13 +43,6 @@ export const metadata: Metadata = {
 
 /** Parité M7 : 15 lignes par page (CANDIDATURES_PAR_PAGE, même rythme). */
 const SIGNALEMENTS_PAR_PAGE = 15
-
-/** Puce active (motif des puces de /messages, tokens M2). */
-const CLASSE_PUCE_ACTIVE =
-  'inline-flex h-9 items-center rounded-sm border border-brand bg-brand px-3 text-sm font-medium text-white'
-
-const CLASSE_PUCE =
-  'inline-flex h-9 items-center rounded-sm border border-line-strong bg-surface px-3 text-sm font-medium text-ink-muted transition-colors duration-fast hover:bg-surface-alt hover:text-ink'
 
 /**
  * Paramètre d'URL sous forme de chaîne UNIQUE — `?statut=a&statut=b`
@@ -112,39 +107,34 @@ export default async function PageSignalements({
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <h1 className="text-2xl font-bold tracking-tight text-ink">
-        {TEXTES.titreSignalements}
-      </h1>
+      <EnTeteAdmin
+        titre={TEXTES.titreSignalements}
+        description="File de modération : les contenus privés ne sont consultables qu’après une décision d’accès tracée."
+      />
 
-      {/* Bascule de filtre : la puce active n'est JAMAIS un lien vers sa
-          propre URL (aria-current marque l'état, l'href reste la cible du
-          filtre) — motif exact des puces de /messages. */}
-      <nav className="flex flex-wrap items-center gap-2">
-        <Link
-          href="/admin/signalements"
-          aria-current={filtre === 'ouvert' ? 'page' : undefined}
-          className={filtre === 'ouvert' ? CLASSE_PUCE_ACTIVE : CLASSE_PUCE}
-        >
-          {TEXTES.filtreOuverts}
-        </Link>
-        <Link
-          href="/admin/signalements?statut=traite"
-          aria-current={filtre === 'traite' ? 'page' : undefined}
-          className={filtre === 'traite' ? CLASSE_PUCE_ACTIVE : CLASSE_PUCE}
-        >
-          {TEXTES.filtreTraites}
-        </Link>
-      </nav>
+      <FiltresAdmin
+        ariaLabel="Filtrer les signalements"
+        items={[
+          {
+            label: TEXTES.filtreOuverts,
+            href: '/admin/signalements',
+            actif: filtre === 'ouvert',
+          },
+          {
+            label: TEXTES.filtreTraites,
+            href: '/admin/signalements?statut=traite',
+            actif: filtre === 'traite',
+          },
+        ]}
+      />
 
       <ul className="divide-y divide-line rounded-md border border-line bg-surface shadow-card">
         {lignesAffichees.length === 0 ? (
-          // État vide : libellé unique TEXTES, icône décorative (motif des
-          // états vides M6/M7).
-          <li className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-            <IconFlag size={32} className="text-ink-muted opacity-25" />
-            <p className="text-sm font-semibold text-ink-muted">
-              {TEXTES.listeSignalementsVide}
-            </p>
+          <li>
+            <EtatVideAdmin
+              message={TEXTES.listeSignalementsVide}
+              icone={<IconFlag size={32} />}
+            />
           </li>
         ) : (
           lignesAffichees.map((signalement) => (
