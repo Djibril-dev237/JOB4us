@@ -675,46 +675,26 @@ describe('changerStatutCandidature', () => {
     expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
-  it("l'admin n'a aucun périmètre (findUnique sans jointure) mais reste soumis à la matrice", async () => {
-    vi.mocked(verifyRole).mockResolvedValue({ userId: USER_ID, role: 'admin' })
-    candidatureFindUnique.mockResolvedValue({
-      statut: 'acceptee',
-      offreId: OFFRE_ID,
-      candidatId: CANDIDAT_ID,
-    })
+  it("refuse l'admin : la garde recruteur meurt avant toute lecture", async () => {
+    vi.mocked(verifyRole).mockRejectedValueOnce(new Error('REDIRECT:/unauthorized'))
 
-    // Ligne d'un autre recruteur : l'admin lit globalement, la transition
-    // reste soumise à la matrice (admin peut retirer une acceptée).
-    await attendRedirection(
+    await expect(
       changerStatutCandidature(formOf({ id: String(CANDIDATURE_ID), vers: 'retiree' })),
-      '/recruteur/candidatures?maj=statut',
-    )
+    ).rejects.toThrow('REDIRECT:/unauthorized')
 
-    expect(candidatureFindUnique).toHaveBeenCalledWith({
-      where: { id: CANDIDATURE_ID },
-      select: { statut: true, offreId: true, candidatId: true },
-    })
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
     expect(candidatureFindFirst).not.toHaveBeenCalled()
-    // Aucune jointure d'ownership dans le CAS d'un admin.
-    expect(whereUpdateMany()).toEqual({ id: CANDIDATURE_ID, statut: 'acceptee' })
-    // Audit : ancien = statut LU en contrôle, nouveau = cible du formulaire.
-    expect(auditCandidatureCreate).toHaveBeenCalledWith({
-      data: {
-        candidatureId: CANDIDATURE_ID,
-        acteurId: USER_ID,
-        action: 'transition',
-        ancienStatut: 'acceptee',
-        nouveauStatut: 'retiree',
-      },
-    })
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
+    expect(candidatureUpdateMany).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
-  it('exige recruteur OU admin EN PREMIER', async () => {
+  it('exige le rôle recruteur EN PREMIER', async () => {
     vi.mocked(verifyRole).mockRejectedValueOnce(new Error('STOP_ROLE'))
 
     await expect(changerStatutCandidature(formOf(FORM_TRANSITION))).rejects.toThrow('STOP_ROLE')
 
-    expect(verifyRole).toHaveBeenCalledWith('recruteur', 'admin')
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
     expect(candidatureFindFirst).not.toHaveBeenCalled()
     expect(candidatureFindUnique).not.toHaveBeenCalled()
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
@@ -730,12 +710,12 @@ describe('marquerConsultee', () => {
     vi.mocked(verifyRole).mockResolvedValue({ userId: USER_ID, role: 'recruteur' })
   })
 
-  it('exige le rôle recruteur/admin : aucune écriture sans autorisation (P1-1)', async () => {
+  it('exige le rôle recruteur : aucune écriture sans autorisation (P1-1)', async () => {
     vi.mocked(verifyRole).mockRejectedValueOnce(new Error('STOP_ROLE'))
 
     await expect(marquerConsultee(CANDIDATURE_ID)).resolves.toBeUndefined()
 
-    expect(verifyRole).toHaveBeenCalledWith('recruteur', 'admin')
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
     // Garde d'autorisation : POST direct non authentifié → aucune écriture.
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(statutChange).not.toHaveBeenCalled()
@@ -770,15 +750,14 @@ describe('marquerConsultee', () => {
     expect(transaction).toHaveBeenCalledTimes(1)
   })
 
-  it('admin : périmètre global (lecture/transition admin sans jointure)', async () => {
-    vi.mocked(verifyRole).mockResolvedValue({ userId: USER_ID, role: 'admin' })
+  it("admin : la garde recruteur refuse, aucune écriture", async () => {
+    vi.mocked(verifyRole).mockRejectedValue(new Error('REDIRECT:/unauthorized'))
 
-    await marquerConsultee(CANDIDATURE_ID)
+    await expect(marquerConsultee(CANDIDATURE_ID)).resolves.toBeUndefined()
 
-    expect(candidatureUpdateMany).toHaveBeenCalledWith({
-      where: { id: CANDIDATURE_ID, statut: 'envoyee' },
-      data: { statut: 'consultee' },
-    })
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
+    expect(candidatureUpdateMany).not.toHaveBeenCalled()
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
   })
 
   it('best-effort : une exception base ne se propage JAMAIS (page jamais en erreur)', async () => {

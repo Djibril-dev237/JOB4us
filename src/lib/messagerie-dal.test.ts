@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Prisma as NsPrisma } from '@prisma/client'
 
+import { TEXTE_MESSAGE_MASQUE } from './moderation-labels'
 import {
   PAGE,
   avancerLecture,
@@ -95,6 +96,12 @@ interface ArgsSignalementCreate {
   data: NsPrisma.SignalementUncheckedCreateInput
 }
 
+interface ArgsModerationFindMany {
+  where?: { messageId?: { in: number[] } }
+  orderBy?: NsPrisma.MessageModerationOrderByWithRelationInput[]
+  select?: NsPrisma.MessageModerationSelect
+}
+
 // Lignes simulées (payload retourné par le mock, jamais `any`).
 
 interface UserSim {
@@ -145,6 +152,7 @@ const {
   blocageCreate,
   blocageDeleteMany,
   signalementCreate,
+  messageModerationFindMany,
 } = vi.hoisted(() => ({
   conversationFindFirst: vi.fn<(args: ArgsConversationFindFirst) => Promise<unknown>>(),
   conversationFindMany: vi.fn<(args: ArgsConversationFindMany) => Promise<unknown>>(),
@@ -158,6 +166,7 @@ const {
   blocageCreate: vi.fn<(args: ArgsBlocageCreate) => Promise<unknown>>(),
   blocageDeleteMany: vi.fn<(args: ArgsBlocageDeleteMany) => Promise<{ count: number }>>(),
   signalementCreate: vi.fn<(args: ArgsSignalementCreate) => Promise<unknown>>(),
+  messageModerationFindMany: vi.fn<(args: ArgsModerationFindMany) => Promise<unknown>>(),
 }))
 
 // Seules les méthodes du DAL sont exposées : une requête de plus (un findMany
@@ -176,6 +185,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     blocage: { create: blocageCreate, deleteMany: blocageDeleteMany },
     signalement: { create: signalementCreate },
+    messageModeration: { findMany: messageModerationFindMany },
   },
 }))
 
@@ -229,6 +239,7 @@ beforeEach(() => {
   blocageCreate.mockReset()
   blocageDeleteMany.mockReset()
   signalementCreate.mockReset()
+  messageModerationFindMany.mockReset()
   conversationFindFirst.mockResolvedValue(null)
   conversationFindMany.mockResolvedValue([])
   messageFindFirst.mockResolvedValue(null)
@@ -242,6 +253,7 @@ beforeEach(() => {
   // deleteMany à 0 ligne = « déjà débloqué » : le DAL doit l'absorber.
   blocageDeleteMany.mockResolvedValue({ count: 0 })
   signalementCreate.mockResolvedValue(null)
+  messageModerationFindMany.mockResolvedValue([])
 })
 
 // ─── chargerConversation ────────────────────────────────────────────────────
@@ -336,9 +348,13 @@ describe('chargerConversation (participation dans la MÊME requête)', () => {
 
 // ─── listerConversations ────────────────────────────────────────────────────
 
-describe('listerConversations (3 requêtes fixes, aucun N+1)', () => {
-  it('masque MA conversation → exclue ; exactement 3 requêtes au total', async () => {
-    const visible = convCandidat()
+describe('listerConversations (4 requêtes fixes, aucun N+1)', () => {
+  it('masque MA conversation → exclue ; exactement 4 requêtes au total', async () => {
+    const visible = convCandidat({
+      messages: [
+        { id: 1, contenu: 'Bonjour', senderId: CANDIDAT_USER_ID, createdAt: new Date('2026-10-01T00:00:00Z') },
+      ],
+    })
     const masquee = convCandidat({ id: 6, candidatureId: 10 })
     conversationFindMany.mockResolvedValue([visible, masquee])
     // Mon état : la conv 6 est masquée de mon côté, la 5 ne l’est pas.
@@ -351,10 +367,11 @@ describe('listerConversations (3 requêtes fixes, aucun N+1)', () => {
 
     expect(lignes.map((ligne) => ligne.conversationId)).toEqual([5])
 
-    // 3 requêtes fixes : une par modèle, AUCUNE de plus.
+    // 4 requêtes fixes : une par modèle, AUCUNE de plus.
     expect(conversationFindMany).toHaveBeenCalledTimes(1)
     expect(etatFindMany).toHaveBeenCalledTimes(1)
     expect(messageFindMany).toHaveBeenCalledTimes(1)
+    expect(messageModerationFindMany).toHaveBeenCalledTimes(1)
 
     // Filtre rôle candidat + exclusion des masquées portés par le WHERE
     // (rien n’est filtré après coup au prix d’une requête de plus).
@@ -433,7 +450,41 @@ describe('listerConversations (3 requêtes fixes, aucun N+1)', () => {
     expect(lignes[0]?.titreOffre).toBe('Developpeur back-end')
   })
 
-  it('aucune conversation → UNE seule requête (les deux autres sont sautées)', async () => {
+  it('aperçu masqué → texte neutre, jamais le contenu d’origine', async () => {
+    conversationFindMany.mockResolvedValue([
+      convCandidat({
+        messages: [
+          { id: 1, contenu: 'contenu privé', senderId: RECRUTEUR_USER_ID, createdAt: new Date('2026-10-01T00:00:00Z') },
+        ],
+      }),
+    ])
+    messageModerationFindMany.mockResolvedValue([{ messageId: 1, action: 'masquage' }])
+
+    const lignes = await listerConversations(CANDIDAT_USER_ID, 'candidat')
+
+    expect(lignes[0]?.dernierMessage?.contenu).toBe(TEXTE_MESSAGE_MASQUE)
+    expect(lignes[0]?.dernierMessage?.contenu).not.toContain('contenu privé')
+  })
+
+  it('rétablissement plus récent → l’aperçu redevient visible', async () => {
+    conversationFindMany.mockResolvedValue([
+      convCandidat({
+        messages: [
+          { id: 1, contenu: 'message rétabli', senderId: RECRUTEUR_USER_ID, createdAt: new Date('2026-10-01T00:00:00Z') },
+        ],
+      }),
+    ])
+    messageModerationFindMany.mockResolvedValue([
+      { messageId: 1, action: 'retablissement' },
+      { messageId: 1, action: 'masquage' },
+    ])
+
+    const lignes = await listerConversations(CANDIDAT_USER_ID, 'candidat')
+
+    expect(lignes[0]?.dernierMessage?.contenu).toBe('message rétabli')
+  })
+
+  it('aucune conversation → UNE seule requête (les autres sont sautées)', async () => {
     conversationFindMany.mockResolvedValue([])
 
     expect(await listerConversations(CANDIDAT_USER_ID, 'candidat')).toEqual([])
@@ -441,6 +492,7 @@ describe('listerConversations (3 requêtes fixes, aucun N+1)', () => {
     expect(conversationFindMany).toHaveBeenCalledTimes(1)
     expect(etatFindMany).not.toHaveBeenCalled()
     expect(messageFindMany).not.toHaveBeenCalled()
+    expect(messageModerationFindMany).not.toHaveBeenCalled()
   })
 })
 

@@ -20,9 +20,8 @@ import { FORMATEUR_DATE, extrait } from './affichage'
 // — aucun défilement horizontal.
 // ---------------------------------------------------------------------------
 
-/** Longueurs d'extrait (points de code) : la ligne reste lisible à 360 px. */
+/** Longueur d'extrait du motif (points de code) : lisible à 360 px. */
 const LONGUEUR_EXTRAIT_MOTIF = 120
-const LONGUEUR_EXTRAIT_MESSAGE = 160
 
 export interface SignalementLigne {
   id: number
@@ -30,7 +29,6 @@ export interface SignalementLigne {
   statut: StatutSignalement
   createdAt: Date
   auteurNom: string
-  messageExtrait: string
 }
 
 interface LigneSignalementProps {
@@ -51,10 +49,8 @@ export function LigneSignalement({ signalement }: LigneSignalementProps) {
           </Link>
         </h2>
 
-        {/* Extrait du message signalé : texte brut échappé par React. */}
-        <p className="mt-1 min-w-0 break-words text-sm text-ink-muted">
-          {extrait(signalement.messageExtrait, LONGUEUR_EXTRAIT_MESSAGE)}
-        </p>
+        {/* Aucun extrait du message dans la file : le contenu privé n'est
+            lisible qu'après la procédure d'accès du détail. */}
 
         {/* Auteur du signalement + date de création (motif de date M6). */}
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-ink-muted">

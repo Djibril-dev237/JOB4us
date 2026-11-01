@@ -51,6 +51,12 @@ export function decisionSuspendCompte(decision: DecisionSignalement): boolean {
   return decision === 'suspension'
 }
 
+/**
+ * Texte neutre affiché aux participants à la place d'un message masqué.
+ * Aucun extrait du contenu d'origine, aucune indication sur le signalement.
+ */
+export const TEXTE_MESSAGE_MASQUE = 'Message masqué par la modération.'
+
 /** Libellé d'une décision stockée ; `null` = signalement historique. */
 export function libelleDecision(decision: string | null | undefined): string {
   if (decision === null || decision === undefined) return 'Décision non renseignée'

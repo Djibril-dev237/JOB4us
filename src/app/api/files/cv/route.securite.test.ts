@@ -12,7 +12,7 @@ import * as route from './route'
 // Mêmes exigences que candidatures.securite.test.ts : PRouver les refus déjà
 // verrouillés dans route.ts, sans rien y changer. Cas V3-J :
 //   cas 9  mode `?candidature=` : UNE ligne `consultation` par accès
-//          recruteur/admin, acteur = LEUR userId, cible = la ligne, écrite
+//          recruteur, acteur = son userId, cible = la ligne, écrite
 //          APRÈS logCvAccess et AVANT la signature — échec d'une des deux
 //          traces ⇒ aucune URL signée (fail-closed) ;
 //   cas 10 AUCUNE écriture au mauvais endroit : le propriétaire candidat lit
@@ -144,7 +144,7 @@ beforeEach(() => {
 
 // ─── CAS 9 — la `consultation` est écrite PAR l'acteur, AVANT la diffusion ──
 
-describe('cas 9 — audit `consultation` fidèle (recruteur ET admin)', () => {
+describe('cas 9 — audit `consultation` fidèle (recruteur uniquement en M10)', () => {
   it("recruteur : UNE ligne `consultation` (acteur = son userId, cible = la ligne), APRÈS logCvAccess, AVANT signDownloadUrl", async () => {
     login(3, 'recruteur')
 
@@ -170,27 +170,15 @@ describe('cas 9 — audit `consultation` fidèle (recruteur ET admin)', () => {
     expect(ordreSignature).toBeGreaterThan(ordreAudit)
   })
 
-  it('admin : même écriture unique, acteur = userId admin (lecture globale)', async () => {
+  it("admin : refus 403, aucune trace et aucune URL signée", async () => {
     login(1, 'admin')
 
     const response = await route.GET(cvRequest())
 
-    expect(response.status).toBe(302)
-    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
-    expect(auditCandidatureCreate).toHaveBeenCalledWith({
-      data: {
-        candidatureId: 11,
-        acteurId: 1,
-        action: ACTION_AUDIT_CONSULTATION,
-        ancienStatut: null,
-        nouveauStatut: null,
-      },
-    })
-    expect(logCvAccess).toHaveBeenCalledWith(1, 5)
-    // Le SNAPSHOT de la ligne est servi, jamais le cvPath du profil.
-    expect(signDownloadUrl).toHaveBeenCalledWith(
-      expect.objectContaining({ key: SNAPSHOT, filename: 'cv-candidature-11.pdf' }),
-    )
+    expect(response.status).toBe(403)
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
+    expect(logCvAccess).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 
   it("échec de l'audit : AUCUNE URL signée, l'exception se propage (même régime que logCvAccess)", async () => {
@@ -222,7 +210,7 @@ describe('cas 9 — audit `consultation` fidèle (recruteur ET admin)', () => {
 
 // ─── CAS 10 — aucune écriture au mauvais endroit ────────────────────────────
 
-describe("cas 10 — pas d'audit hors du couple (recruteur/admin, ?candidature=)", () => {
+describe("cas 10 - pas d'audit hors du couple (recruteur, ?candidature=)", () => {
   it("propriétaire candidat lisant sa propre pièce jointe : 302 SANS journal d'accès et SANS `consultation`", async () => {
     login(42, 'candidat')
 
@@ -254,14 +242,15 @@ describe("cas 10 — pas d'audit hors du couple (recruteur/admin, ?candidature=)
     expect(candidatureFindUnique).not.toHaveBeenCalled()
   })
 
-  it("mode ?candidatId= admin : idem — AUCUNE ligne `consultation`", async () => {
+  it("mode ?candidatId= admin : refus 403, aucune écriture", async () => {
     login(1, 'admin')
 
     const response = await route.GET(cvRequest('?candidatId=5'))
 
-    expect(response.status).toBe(302)
-    expect(logCvAccess).toHaveBeenCalledWith(1, 5)
+    expect(response.status).toBe(403)
+    expect(logCvAccess).not.toHaveBeenCalled()
     expect(auditCandidatureCreate).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 
   it("mode ?candidatId= candidat sur son propre profil : AUCUNE écriture", async () => {

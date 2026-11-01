@@ -110,6 +110,12 @@ interface ArgsSignalementCreate {
   data: NsPrisma.SignalementUncheckedCreateInput
 }
 
+interface ArgsModerationFindMany {
+  where?: { messageId?: { in: number[] } }
+  orderBy?: NsPrisma.MessageModerationOrderByWithRelationInput[]
+  select?: NsPrisma.MessageModerationSelect
+}
+
 // Lignes simulées (payload retourné par le mock, jamais `any`).
 
 interface UserSim {
@@ -166,6 +172,7 @@ const {
   blocageCreate,
   blocageDeleteMany,
   signalementCreate,
+  messageModerationFindMany,
 } = vi.hoisted(() => ({
   conversationFindFirst: vi.fn<(args: ArgsConversationFindFirst) => Promise<unknown>>(),
   messageCreate: vi.fn<(args: ArgsMessageCreate) => Promise<MessageSim>>(),
@@ -178,6 +185,7 @@ const {
   blocageCreate: vi.fn<(args: ArgsBlocageCreate) => Promise<unknown>>(),
   blocageDeleteMany: vi.fn<(args: ArgsBlocageDeleteMany) => Promise<{ count: number }>>(),
   signalementCreate: vi.fn<(args: ArgsSignalementCreate) => Promise<unknown>>(),
+  messageModerationFindMany: vi.fn<(args: ArgsModerationFindMany) => Promise<unknown>>(),
 }))
 
 // Seules les méthodes utilisées par les actions + le DAL sont exposées : une
@@ -194,6 +202,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     blocage: { findFirst: blocageFindFirst, create: blocageCreate, deleteMany: blocageDeleteMany },
     signalement: { create: signalementCreate },
+    messageModeration: { findMany: messageModerationFindMany },
   },
 }))
 
@@ -291,6 +300,7 @@ beforeEach(() => {
   blocageCreate.mockImplementation(async () => ({ id: 1 }))
   blocageDeleteMany.mockImplementation(async () => ({ count: 1 }))
   signalementCreate.mockImplementation(async () => ({ id: 1 }))
+  messageModerationFindMany.mockImplementation(async () => [])
   messageFindFirst.mockImplementation(async () => ({ createdAt: MESSAGE_DATE }))
   etatUpdateMany.mockImplementation(async () => ({ count: 1 }))
   etatFindUnique.mockImplementation(async () => null)

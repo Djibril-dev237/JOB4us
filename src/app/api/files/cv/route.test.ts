@@ -217,18 +217,18 @@ describe('GET /api/files/cv — recruteur (lignes 4-5)', () => {
   })
 })
 
-describe('GET /api/files/cv — admin (ligne 6)', () => {
-  it('autorise toujours : 302 + journal', async () => {
+describe('GET /api/files/cv — admin exclu (M10)', () => {
+  it("refuse l'admin : 403, sans journal ni URL signée", async () => {
     login(1, 'admin')
     candidatFindUnique.mockResolvedValue(CIBLE)
 
     const response = await GET(cvRequest())
 
-    expect(response.status).toBe(302)
-    expect(logCvAccess).toHaveBeenCalledWith(1, 5)
+    expect(response.status).toBe(403)
+    expect(logCvAccess).not.toHaveBeenCalled()
     expect(candidatureFindFirst).not.toHaveBeenCalled()
-    // Mode PROFIL : l'audit de candidature n'écrit jamais ici.
     expect(auditCandidatureCreate).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 })
 
@@ -329,18 +329,15 @@ describe('GET /api/files/cv — pièce jointe de candidature (lignes M7)', () =>
     expect(logCvAccess).not.toHaveBeenCalled()
   })
 
-  it("autorise l'admin : 302 + journal sur le candidat propriétaire", async () => {
+  it("refuse l'admin : 403, sans journal ni URL signée", async () => {
     login(1, 'admin')
     candidatureFindUnique.mockResolvedValue(CANDIDATURE)
 
     const response = await GET(cvRequest('?candidature=11'))
 
-    expect(response.status).toBe(302)
-    expect(response.headers.get('location')).toBe(SIGNED_URL)
-    expect(logCvAccess).toHaveBeenCalledWith(1, 5)
-    expect(signDownloadUrl).toHaveBeenCalledWith(
-      expect.objectContaining({ key: SNAPSHOT, filename: 'cv-candidature-11.pdf' }),
-    )
+    expect(response.status).toBe(403)
+    expect(logCvAccess).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 
   it('répond 401 à un visiteur avant toute requête base', async () => {
@@ -414,16 +411,14 @@ describe('GET /api/files/cv — audit AuditCandidature (V3-I)', () => {
     expect(ordreSignature).toBeGreaterThan(ordreAudit)
   })
 
-  it('mode ?candidature= admin : même écriture, acteur = userId admin', async () => {
+  it('mode ?candidature= admin : refus 403, AUCUNE écriture', async () => {
     login(1, 'admin')
 
     const response = await GET(cvRequest('?candidature=11'))
 
-    expect(response.status).toBe(302)
-    expect(auditCandidatureCreate).toHaveBeenCalledTimes(1)
-    expect(auditCandidatureCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ acteurId: 1 }) }),
-    )
+    expect(response.status).toBe(403)
+    expect(auditCandidatureCreate).not.toHaveBeenCalled()
+    expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 
   it("refus 403 (candidature d’autrui) : AUCUNE écriture d’audit", async () => {

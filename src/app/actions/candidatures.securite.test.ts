@@ -594,8 +594,8 @@ describe('cas 2 — matrice des transitions : seul le droit décide', () => {
     expect(peutTransiter('acceptee', 'retiree', 'recruteur')).toBe(false)
   })
 
-  it("parcours exhaustif 7 sources × 7 cibles × 2 acteurs : le verdict de l'action SUIVRA la matrice, jamais autre chose", async () => {
-    for (const acteur of ['recruteur', 'admin'] as const) {
+  it("parcours exhaustif 7 sources × 7 cibles (recruteur) : le verdict de l'action SUIVRA la matrice, jamais autre chose", async () => {
+    for (const acteur of ['recruteur'] as const) {
       vi.mocked(verifyRole).mockResolvedValue({ userId: USER_ID, role: acteur })
       for (const depuis of STATUTS) {
         for (const vers of STATUTS) {
@@ -745,19 +745,18 @@ describe('cas 4 — scoping recruteur : le périmètre voyage dans la requête',
     expect(statutChange).not.toHaveBeenCalled()
   })
 
-  it('la même ligne vue par l ADMIN (lecture globale) reste soumise à la matrice — pas de passe-droit', async () => {
-    vi.mocked(verifyRole).mockResolvedValue({ userId: USER_ID, role: 'admin' })
+  it("l'ADMIN est refusé par la garde recruteur avant toute lecture", async () => {
+    vi.mocked(verifyRole).mockRejectedValue(new Error('REDIRECT:/unauthorized'))
     base.ligne = { ...ligneDeBase(), statut: 'retiree', offreUserId: 8 }
 
-    await attendRedirection(
+    const verdict = await symptome(
       changerStatutCandidature(formOf({ id: String(CANDIDATURE_ID), vers: 'preselectionnee' })),
-      '/recruteur/candidatures?erreur=transition',
     )
 
-    expect(candidatureFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: CANDIDATURE_ID } }),
-    )
+    expect(verdict).toBe('REDIRECT:/unauthorized')
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
     expect(candidatureFindFirst).not.toHaveBeenCalled()
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(base.audits).toHaveLength(0)
   })
@@ -766,13 +765,13 @@ describe('cas 4 — scoping recruteur : le périmètre voyage dans la requête',
 // ─── CAS 5 — candidat ne change jamais, recruteur ne retire jamais ──────────
 
 describe('cas 5 — rôles : les gardes meurent AVANT toute lecture', () => {
-  it("candidat sur changerStatutCandidature : verifyRole('recruteur','admin') refuse — aucune lecture, aucune écriture", async () => {
+  it("candidat sur changerStatutCandidature : verifyRole('recruteur') refuse — aucune lecture, aucune écriture", async () => {
     vi.mocked(verifyRole).mockRejectedValue(new Error('REDIRECT:/unauthorized'))
 
     const verdict = await symptome(changerStatutCandidature(formOf(FORM_TRANSITION)))
 
     expect(verdict).toBe('REDIRECT:/unauthorized')
-    expect(verifyRole).toHaveBeenCalledWith('recruteur', 'admin')
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
     expect(candidatureFindFirst).not.toHaveBeenCalled()
     expect(candidatureFindUnique).not.toHaveBeenCalled()
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
@@ -816,16 +815,18 @@ describe('cas 5 — rôles : les gardes meurent AVANT toute lecture', () => {
     expect(base.audits).toHaveLength(0)
   })
 
-  it("changerStatut avec une session candidat (garde contournée) : c'est la MATRICE qui refuse", async () => {
-    // Garde contournée + ligne lue (findUnique non scopé côté « acteur »
-    // non recruteur) : la défense restante est la matrice, acteur-aware.
+  it("changerStatut avec une session candidat (garde contournée) : refus explicite avant toute lecture", async () => {
+    // M10 : même si la garde de rôle était contournée, l'action revérifie le
+    // rôle et renvoie /unauthorized avant la moindre lecture de candidature.
     vi.mocked(verifyRole).mockResolvedValue({ userId: USER_ID, role: 'candidat' })
 
     await attendRedirection(
       changerStatutCandidature(formOf(FORM_TRANSITION)),
-      '/recruteur/candidatures?erreur=transition',
+      '/unauthorized',
     )
 
+    expect(candidatureFindFirst).not.toHaveBeenCalled()
+    expect(candidatureFindUnique).not.toHaveBeenCalled()
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(base.audits).toHaveLength(0)
     expect(base.ligne?.statut).toBe('envoyee')
@@ -906,7 +907,7 @@ describe('cas 7 — marquerConsultee : jamais de transition sans droit ni trace'
 
     await expect(marquerConsultee(CANDIDATURE_ID)).resolves.toBeUndefined()
 
-    expect(verifyRole).toHaveBeenCalledWith('recruteur', 'admin')
+    expect(verifyRole).toHaveBeenCalledWith('recruteur')
     expect(candidatureUpdateMany).not.toHaveBeenCalled()
     expect(base.audits).toHaveLength(0)
     expect(transaction).not.toHaveBeenCalled()

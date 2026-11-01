@@ -13,7 +13,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 // | visiteur   | aucun                             | 401      |
 // | utilisateur| son propre avatar (userId)       | 302      |
 // | utilisateur| avatar d'un autre compte         | 403      |
-// | admin      | toujours                         | 302      |
+// | admin      | son propre avatar uniquement     | 302/403  |
 //
 // JUSTIFICATION du refus des tiers : aucune vue publique de profil n'existe
 // (décision Étape 2 : « ne pas en créer ») et aucune page affiche aujourd'hui
@@ -47,8 +47,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Fichier introuvable.' }, { status: 404 })
   }
 
-  // 3. Matrice : propriétaire OU admin, rien d'autre.
-  const allowed = role === 'admin' || targetId === userId
+  // 3. Matrice M10 : propriétaire uniquement, y compris pour un admin.
+  const allowed = targetId === userId
   if (!allowed) {
     return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 })
   }

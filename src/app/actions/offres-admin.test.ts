@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Prisma } from '@prisma/client'
 
-import { verifyRole } from '@/lib/dal'
+import { reauthAdminValide } from '@/lib/admin-reauth'
+import { requireAdmin } from '@/lib/dal'
 import { offreIndisponible } from '@/lib/evenements-offres'
+import { consignerAudit } from '@/lib/journal-audit'
 import { notFound, redirect } from 'next/navigation'
 
 import { releverOffre, suspendreOffre } from './offres-admin'
@@ -36,8 +38,13 @@ const { offreFindFirst, offreUpdateMany } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/dal', () => ({
-  verifyRole: vi.fn(),
-  verifySession: vi.fn(),
+  requireAdmin: vi.fn(),
+}))
+vi.mock('@/lib/admin-reauth', () => ({
+  reauthAdminValide: vi.fn(),
+}))
+vi.mock('@/lib/journal-audit', () => ({
+  consignerAudit: vi.fn(async () => undefined),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -91,7 +98,8 @@ function formOf(entries: Record<string, string>): FormData {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(verifyRole).mockResolvedValue({ userId: 42, role: 'admin' })
+  vi.mocked(requireAdmin).mockResolvedValue({ userId: 42, role: 'admin', sessionVersion: 0 })
+  vi.mocked(reauthAdminValide).mockResolvedValue(true)
   offreFindFirst.mockResolvedValue(OFFRE_VIVANTE)
   offreUpdateMany.mockResolvedValue({ count: 1 })
 })
@@ -100,7 +108,7 @@ describe('suspendreOffre (T8)', () => {
   it('CAS `statut in` exact puis redirection ?maj=suspendue', async () => {
     await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
 
-    expect(verifyRole).toHaveBeenCalledWith('admin')
+    expect(requireAdmin).toHaveBeenCalledTimes(1)
     // Existence + suppression logique dans LA même lecture, sans périmètre
     // d'entreprise (l'admin voit toutes les offres).
     expect(offreFindFirst).toHaveBeenCalledTimes(1)
@@ -134,7 +142,7 @@ describe('releverOffre (T9)', () => {
   it('CAS `statut: suspendue` → brouillon, puis redirection ?maj=levee', async () => {
     await expect(releverOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
 
-    expect(verifyRole).toHaveBeenCalledWith('admin')
+    expect(requireAdmin).toHaveBeenCalledTimes(1)
     expect(offreUpdateMany).toHaveBeenCalledTimes(1)
     expect(offreUpdateMany.mock.calls[0]?.[0]).toEqual({
       where: { id: 42, deletedAt: null, statut: 'suspendue' },
@@ -228,26 +236,54 @@ describe('sécurité payload (matrice seule)', () => {
   })
 })
 
-describe('rôles', () => {
-  it('verifyRole(’admin’) en premier : rôle insuffisant → aucune requête (T8)', async () => {
-    vi.mocked(verifyRole).mockRejectedValueOnce(new Error('NEXT_REDIRECT'))
+describe('rôles et réauthentification', () => {
+  it('requireAdmin en premier : non-admin → 404 avant toute requête (T8)', async () => {
+    vi.mocked(requireAdmin).mockRejectedValueOnce(new Error('NEXT_NOT_FOUND'))
 
-    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_NOT_FOUND')
 
-    expect(verifyRole).toHaveBeenCalledWith('admin')
+    expect(requireAdmin).toHaveBeenCalledTimes(1)
     expect(offreFindFirst).not.toHaveBeenCalled()
     expect(offreUpdateMany).not.toHaveBeenCalled()
     expect(redirect).not.toHaveBeenCalled()
   })
 
-  it('verifyRole(’admin’) en premier : rôle insuffisant → aucune requête (T9)', async () => {
-    vi.mocked(verifyRole).mockRejectedValueOnce(new Error('NEXT_REDIRECT'))
+  it('requireAdmin en premier : non-admin → 404 avant toute requête (T9)', async () => {
+    vi.mocked(requireAdmin).mockRejectedValueOnce(new Error('NEXT_NOT_FOUND'))
 
-    await expect(releverOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(releverOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_NOT_FOUND')
 
-    expect(verifyRole).toHaveBeenCalledWith('admin')
+    expect(requireAdmin).toHaveBeenCalledTimes(1)
     expect(offreFindFirst).not.toHaveBeenCalled()
     expect(offreUpdateMany).not.toHaveBeenCalled()
     expect(redirect).not.toHaveBeenCalled()
+  })
+
+  it('sans réauthentification : redirection vers /admin/reauth avant lecture', async () => {
+    vi.mocked(reauthAdminValide).mockResolvedValueOnce(false)
+
+    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(redirect).toHaveBeenCalledWith('/admin/reauth?retour=%2Fadmin%2Foffres')
+    expect(offreFindFirst).not.toHaveBeenCalled()
+    expect(offreUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('audit écrit AVANT la mutation (T8)', async () => {
+    // Le mock de `redirect` lève : la mutation est atteinte, l'audit aussi.
+    await expect(suspendreOffre(formOf({ id: '42' }))).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(consignerAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        acteurId: 42,
+        action: 'suspension_offre',
+        cibleType: 'offre',
+        cibleId: 42,
+      }),
+    )
+    expect(vi.mocked(consignerAudit).mock.invocationCallOrder[0]).toBeLessThan(
+      offreUpdateMany.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    )
   })
 })

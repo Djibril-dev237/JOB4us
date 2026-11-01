@@ -10,6 +10,7 @@ import type {
   EvenementSignalementRecu,
 } from '@/lib/evenements-messagerie'
 import type { EvenementOffre } from '@/lib/evenements-offres'
+import type { DecisionSignalement } from '@/lib/moderation-labels'
 import { emettreNotification } from '@/lib/notifications-emission'
 import { prisma } from '@/lib/prisma'
 
@@ -236,8 +237,10 @@ export async function notifierSignalementRecu(
   evenement: EvenementSignalementRecu,
 ): Promise<void> {
   try {
+    // M10 : seuls les admins ACTIFS reçoivent la file de modération. Un
+    // compte suspendu ne doit ni recevoir ni accumuler de notifications.
     const admins = await prisma.user.findMany({
-      where: { role: 'admin' },
+      where: { role: 'admin', isActive: true },
       select: { id: true },
     })
     for (const admin of admins) {
@@ -249,6 +252,30 @@ export async function notifierSignalementRecu(
         variables: { type: 'signalementRecu' },
       })
     }
+  } catch (erreur) {
+    tracer(erreur)
+  }
+}
+
+/**
+ * `moderation` → information de l'AUTEUR du signalement sur la décision
+ * rendue. Le payload ne porte que le signalement, le destinataire et la
+ * décision fermée : aucun texte du message, aucun nom du mis en cause.
+ * `refId` = signalementId : une décision = une notification.
+ */
+export async function notifierDecisionModeration(evenement: {
+  signalementId: number
+  auteurId: number
+  decision: DecisionSignalement
+}): Promise<void> {
+  try {
+    await emettreNotification({
+      destinataireId: evenement.auteurId,
+      type: 'moderation',
+      refId: evenement.signalementId,
+      lien: '/notifications',
+      variables: { type: 'moderation', decision: evenement.decision },
+    })
   } catch (erreur) {
     tracer(erreur)
   }
@@ -268,7 +295,7 @@ export async function notifierOffrePubliee(
     })
     if (offre === null) return
     const admins = await prisma.user.findMany({
-      where: { role: 'admin' },
+      where: { role: 'admin', isActive: true },
       select: { id: true },
     })
     for (const admin of admins) {

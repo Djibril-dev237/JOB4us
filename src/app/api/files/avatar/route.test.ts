@@ -7,8 +7,8 @@ import { signDownloadUrl } from '@/lib/storage'
 import { GET } from './route'
 
 // ─── Tests de la matrice d'accès avatar (Étape 2 validée) ────────────────────
-// Matrice volontairement stricte : propriétaire + admin uniquement ; aucun
-// tiers n'accède à l'avatar d'autrui tant qu'une décision explicite ne
+// Matrice M10 volontairement stricte : propriétaire uniquement, admin compris.
+// Aucun tiers n'accède à l'avatar d'autrui tant qu'une décision explicite ne
 // l'élargit pas (aucune vue publique de profil n'existe — décision Étape 2).
 // ---------------------------------------------------------------------------
 
@@ -132,14 +132,21 @@ describe('GET /api/files/avatar — tiers (lignes 3-4)', () => {
   })
 })
 
-describe('GET /api/files/avatar — admin (ligne 5)', () => {
-  it('autorise toujours : 302 vers URL signée', async () => {
+describe('GET /api/files/avatar — admin (M10)', () => {
+  it("autorise uniquement son propre avatar", async () => {
     login(1, 'admin')
     userFindUnique.mockResolvedValue(AVEC_AVATAR)
 
-    const response = await GET(avatarRequest())
+    expect((await GET(avatarRequest('?userId=1'))).status).toBe(302)
+  })
 
-    expect(response.status).toBe(302)
-    expect(response.headers.get('location')).toBe(SIGNED_URL)
+  it("refuse l'avatar d'un autre compte : 403, sans URL signée", async () => {
+    login(1, 'admin')
+    userFindUnique.mockResolvedValue(AVEC_AVATAR)
+
+    const response = await GET(avatarRequest('?userId=7'))
+
+    expect(response.status).toBe(403)
+    expect(signDownloadUrl).not.toHaveBeenCalled()
   })
 })

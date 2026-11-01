@@ -1,131 +1,366 @@
 'use server'
 
 import { Prisma } from '@prisma/client'
+import { cookies } from 'next/headers'
 
-import { verifySession } from '@/lib/dal'
-import { nettoyerMotif } from '@/lib/messagerie-contenu'
-import { schemaTraiterSignalement } from '@/lib/messagerie-schemas'
+import {
+  ADMIN_ACCES_SIGNALEMENT_TTL_MS,
+  creerJetonAccesSignalement,
+  nomCookieAccesSignalement,
+} from '@/lib/admin-crypto'
+import { accesSignalementValide, reauthAdminValide } from '@/lib/admin-reauth'
+import { requireAdmin } from '@/lib/dal'
+import { consignerAudit } from '@/lib/journal-audit'
+import { nettoyerMessage } from '@/lib/messagerie-contenu'
+import {
+  decisionMasqueMessage,
+  decisionSuspendCompte,
+  type DecisionSignalement,
+} from '@/lib/moderation-labels'
+import {
+  schemaAccesConversation,
+  schemaDecisionSignalement,
+  schemaRetablissementMessage,
+} from '@/lib/moderation-schemas'
+import { notifierDecisionModeration } from '@/lib/notifications-evenements'
 import { prisma } from '@/lib/prisma'
 
-// ─── Actions serveur de MODÉRATION admin (M8, Vague 3) ───────────────────────
+// ─── Actions serveur de MODÉRATION admin (M10) ───────────────────────────────
 //
-// Contrats repris AU MOT de src/app/actions/messagerie.ts (Vague 2) :
+// Toutes les actions appellent `requireAdmin()` en PREMIER : un visiteur ou un
+// non-admin reçoit le 404 strict du DAL, jamais une redirection qui révélerait
+// l'espace. Les actions sensibles vérifient ensuite le grant de
+// réauthentification de 5 minutes ; la consultation privée exige EN PLUS un
+// grant signé lié au signalement, délivré seulement après un motif fermé et
+// une écriture d'audit.
 //
-// * SESSION : `verifySession` (miroir M7/M8), puis garde de RÔLE admin ICI —
-//   l'admin n'a pas accès au canal privé de messagerie, mais c'est lui qui
-//   traite la file de modération. Un rôle non-admin reçoit la panne
-//   GÉNÉRIQUE (`inconnue`), jamais un verdict qui révélerait l'existence
-//   d'un espace de modération. Un non-connecté garde le redirect /login du
-//   DAL (comportement commun à toutes les actions du dépôt).
+//  * `ouvrirConversationSignalement` : motif + réauth -> audit AVANT lecture
+//    -> cookie de grant 5 min. La page ne lit les messages qu'avec ce grant.
+//  * `deciderSignalement` : réauth + grant de signalement -> décision
+//    transactionnelle, masquage append-only, suspension éventuelle, audit.
+//  * `retablirMessage` : réauth -> rétablissement append-only + audit.
 //
-// * ORDRE DE CONTRÔLE (chaque échec précoce = zéro effet de bord) :
-//     1) session + rôle admin          → `inconnue`
-//     2) forme du payload (Zod .strict()) → `inconnue`
-//     3) nettoyage de la note (`nettoyerMotif`) → note vide = `null` stockée
-//     4) écriture compare-and-set, puis décompte → succès / déjà / `inconnue`
-//     5) catch ciblé : log SANS donnée personnelle, verdict `inconnue`
-//
-// * `null` NOTE = note ABSENTE : le schema n'accepte que `string | undefined`
-//   (`.strict()`), le contrat JS du payload admet `null` — la conversion se
-//   fait AVANT le parse, jamais après (un `null` post-parse contournerait la
-//   validation).
-//
-// * CLÔTURE PAR COMPARE-AND-SET : `updateMany({ where: { id, statut:
-//   'ouvert' } })` n'attrape la ligne QUE si elle est encore ouverte — deux
-//   admins qui clôturent le même signalement ne peuvent pas écraser la note
-//   l'un de l'autre (pas de transaction, pas de verrou : le décompte Suffit).
-//   `count === 0` est ensuite DÉCOMPOSÉ (signalement existant = idempotent,
-//   signalement absent = panne générique) : aucune clé d'erreur distincte à
-//   mémoriser côté client.
-//
-// * JAMAIS d'exception brute ne sort de l'action : `traiterSignalement`
-//   renvoie `inconnue`. Aucun seau, aucun hook d'événement (M9 n'a pas
-//   d'événement de modération, et le journal d'accès est porté par la PAGE
-//   de détail : AuditConversation).
+// Aucune exception brute ne sort : les pannes deviennent `inconnue` et les
+// logs ne portent jamais de contenu, de note ou d'identité.
 // ---------------------------------------------------------------------------
 
-/** Verdict d'une clôture : `deja` = le signalement n'était plus ouvert. */
-export type ResultatTraitement =
+export type ResultatAcces =
+  | { ok: true }
+  | { ok: false; erreur: 'inconnue' | 'reauth' | 'interdit' }
+
+export type ResultatDecision =
+  | { ok: true; deja: boolean; decision?: DecisionSignalement }
+  | { ok: false; erreur: 'inconnue' | 'reauth' | 'interdit' }
+
+export type ResultatRetablissement =
   | { ok: true; deja: boolean }
-  | { ok: false; erreur: 'inconnue' }
+  | { ok: false; erreur: 'inconnue' | 'reauth' | 'interdit' }
+
+function notePropre(note: string | undefined): string | null {
+  if (note === undefined) return null
+  const nettoyee = nettoyerMessage(note)
+  return nettoyee === '' ? null : nettoyee
+}
+
+function estErreurSuspensionAdmin(erreur: unknown): boolean {
+  return erreur instanceof ErreurSuspensionAdmin
+}
+
+class ErreurSuspensionAdmin extends Error {}
 
 /**
- * Clôture un signalement (modération admin) avec note interne optionnelle.
- *
- * @param payload identifiant du signalement + note (nullable) — l'ACTEUR
- *        (`traiteParId`) sort de la session, jamais du payload (liste
- *        blanche M7/M8, reconduite).
+ * Ouvre la conversation d'un signalement pour 5 minutes, après motif et
+ * réauthentification. L'audit est écrit AVANT la délivrance du grant : sans
+ * trace, aucun contenu n'est lisible.
  */
-export async function traiterSignalement(payload: {
+export async function ouvrirConversationSignalement(payload: {
   signalementId: number
-  noteInterne: string | null
-}): Promise<ResultatTraitement> {
-  // 1) Session + rôle admin : un non-admin reçoit la panne générique, et le
-  //    reste de l'action n'est même pas interrogé (zéro lecture, zéro
-  //    écriture — cf. les tests).
-  const session = await verifySession()
-  if (session.role !== 'admin') {
-    return { ok: false, erreur: 'inconnue' }
+  motif: string
+}): Promise<ResultatAcces> {
+  const session = await requireAdmin()
+
+  if (!(await reauthAdminValide(session.userId))) {
+    return { ok: false, erreur: 'reauth' }
   }
 
-  // 2) Forme du payload : `null` = note absente (contrat JS) → `undefined`
-  //    pour le schema. La normalisation part d'un objet NEUTRE et ne
-  //    déréférence JAMAIS le payload d'origine : un appel forgé
-  //    `traiterSignalement(null)` lèverait une TypeError HORS try/catch
-  //    (500) si l'on lisait `payload.noteInterne` ici. Le spread conserve
-  //    les clés inconnues d'un appel forgé, que `.strict()` rejette.
-  const brut: Partial<{ signalementId: number; noteInterne: string | null }> =
-    payload ?? {}
-  const parse = schemaTraiterSignalement.safeParse({
-    ...brut,
-    noteInterne: brut.noteInterne ?? undefined,
+  const brut = payload ?? {}
+  const parse = schemaAccesConversation.safeParse({
+    signalementId: brut.signalementId,
+    motif: brut.motif,
   })
-  if (!parse.success) {
-    return { ok: false, erreur: 'inconnue' }
-  }
-
-  // 3) Nettoyage de la note (même pipeline que le motif de signalement) :
-  //    une note réduite à du blanc n'est pas une note → `null` stockée.
-  let notePropre: string | null = null
-  if (parse.data.noteInterne !== undefined) {
-    const nettoyee = nettoyerMotif(parse.data.noteInterne)
-    notePropre = nettoyee === '' ? null : nettoyee
-  }
+  if (!parse.success) return { ok: false, erreur: 'inconnue' }
 
   try {
-    // 4) Compare-and-set : la clause `statut: 'ouvert'` fait que seules les
-    //    lignes ENCORE ouvertes bougent — le décompte décide du verdict.
-    const miseAJour = await prisma.signalement.updateMany({
-      where: { id: parse.data.signalementId, statut: 'ouvert' },
-      data: {
-        statut: 'traite',
-        traiteParId: session.userId,
-        traiteLe: new Date(),
-        noteInterne: notePropre,
-      },
+    const signalement = await prisma.signalement.findUnique({
+      where: { id: parse.data.signalementId },
+      select: { id: true, message: { select: { conversationId: true } } },
     })
-    if (miseAJour.count === 1) {
-      return { ok: true, deja: false }
+    if (signalement === null) return { ok: false, erreur: 'inconnue' }
+
+    // Trace immuable AVANT toute lecture du contenu. Le motif vient du
+    // catalogue fermé ; aucune donnée du message n'entre dans l'audit.
+    await consignerAudit(prisma, {
+      acteurId: session.userId,
+      action: 'consultation_conversation',
+      cibleType: 'signalement',
+      cibleId: signalement.id,
+      motif: parse.data.motif,
+      commentaire: `Conversation ${signalement.message.conversationId}`,
+    })
+
+    const cookieStore = await cookies()
+    cookieStore.set(
+      nomCookieAccesSignalement(signalement.id),
+      creerJetonAccesSignalement(session.userId, signalement.id),
+      {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: Math.floor(ADMIN_ACCES_SIGNALEMENT_TTL_MS / 1000),
+      },
+    )
+    return { ok: true }
+  } catch (erreur) {
+    const code =
+      erreur instanceof Prisma.PrismaClientKnownRequestError ? erreur.code : 'INCONNU'
+    console.error('[admin-moderation] acces', { signalementId: parse.data.signalementId, code })
+    return { ok: false, erreur: 'inconnue' }
+  }
+}
+
+/**
+ * Rend une décision sur un signalement. Une seule décision par signalement :
+ * le compare-and-set sur `statut: 'ouvert'` rend les clics concurrents
+ * idempotents. `masquage` et `suspension` ajoutent une ligne append-only dans
+ * `MessageModeration` ; le message lui-même reste immuable.
+ */
+export async function deciderSignalement(payload: {
+  signalementId: number
+  decision: string
+  motif: string
+  noteInterne?: string
+}): Promise<ResultatDecision> {
+  const session = await requireAdmin()
+
+  if (!(await reauthAdminValide(session.userId))) {
+    return { ok: false, erreur: 'reauth' }
+  }
+
+  const brut = payload ?? {}
+  const parse = schemaDecisionSignalement.safeParse({
+    signalementId: brut.signalementId,
+    decision: brut.decision,
+    motif: brut.motif,
+    noteInterne: brut.noteInterne ?? undefined,
+  })
+  if (!parse.success) return { ok: false, erreur: 'inconnue' }
+
+  // Le contenu n'est décisionnable qu'après la procédure d'accès : motif,
+  // réauthentification, audit et grant lié au signalement.
+  if (!(await accesSignalementValide(session.userId, parse.data.signalementId))) {
+    return { ok: false, erreur: 'interdit' }
+  }
+
+  const signalement = await prisma.signalement.findUnique({
+    where: { id: parse.data.signalementId },
+    select: {
+      id: true,
+      statut: true,
+      auteurId: true,
+      messageId: true,
+      message: {
+        select: {
+          senderId: true,
+          sender: { select: { id: true, role: true } },
+        },
+      },
+    },
+  })
+  if (signalement === null) return { ok: false, erreur: 'inconnue' }
+  if (signalement.statut !== 'ouvert') {
+    return { ok: true, deja: true, decision: parse.data.decision }
+  }
+
+  const suspend = decisionSuspendCompte(parse.data.decision)
+  if (suspend && signalement.message.sender.role === 'admin') {
+    return { ok: false, erreur: 'interdit' }
+  }
+
+  const note = notePropre(parse.data.noteInterne)
+  const masque = decisionMasqueMessage(parse.data.decision)
+
+  try {
+    const resultat = await prisma.$transaction(async (tx) => {
+      const miseAJour = await tx.signalement.updateMany({
+        where: { id: signalement.id, statut: 'ouvert' },
+        data: {
+          statut: 'traite',
+          decision: parse.data.decision,
+          motifDecision: parse.data.motif,
+          noteInterne: note,
+          traiteParId: session.userId,
+          traiteLe: new Date(),
+        },
+      })
+      if (miseAJour.count === 0) {
+        return { deja: true }
+      }
+
+      await consignerAudit(tx, {
+        acteurId: session.userId,
+        action: 'decision_signalement',
+        cibleType: 'signalement',
+        cibleId: signalement.id,
+        motif: parse.data.motif,
+        commentaire: note,
+      })
+
+      if (masque) {
+        await tx.messageModeration.create({
+          data: {
+            messageId: signalement.messageId,
+            signalementId: signalement.id,
+            acteurId: session.userId,
+            action: 'masquage',
+            motif: parse.data.motif,
+            noteInterne: note,
+          },
+        })
+        await consignerAudit(tx, {
+          acteurId: session.userId,
+          action: 'masquage_message',
+          cibleType: 'message',
+          cibleId: signalement.messageId,
+          motif: parse.data.motif,
+          commentaire: note,
+        })
+      }
+
+      if (suspend) {
+        const suspension = await tx.user.updateMany({
+          where: {
+            id: signalement.message.senderId,
+            role: { not: 'admin' },
+          },
+          data: {
+            isActive: false,
+            sessionVersion: { increment: 1 },
+          },
+        })
+        if (suspension.count !== 1) {
+          throw new ErreurSuspensionAdmin()
+        }
+        await consignerAudit(tx, {
+          acteurId: session.userId,
+          action: 'suspension_utilisateur',
+          cibleType: 'utilisateur',
+          cibleId: signalement.message.senderId,
+          motif: parse.data.motif,
+          commentaire: note,
+        })
+      }
+
+      return { deja: false }
+    })
+
+    if (!resultat.deja) {
+      // Fire-and-forget : la notification ne change jamais le verdict.
+      void notifierDecisionModeration({
+        signalementId: signalement.id,
+        auteurId: signalement.auteurId,
+        decision: parse.data.decision,
+      })
     }
 
-    // Décompte 0 : signalement déjà clôturé par un autre admin (idempotent,
-    // AUCUNE seconde écriture) ou signalement inexistant. La lecture ne
-    // porte QUE l'id : rien d'autre n'est nécessaire au verdict.
-    const signalement = await prisma.signalement.findFirst({
-      where: { id: parse.data.signalementId },
+    return {
+      ok: true,
+      deja: resultat.deja,
+      decision: parse.data.decision,
+    }
+  } catch (erreur) {
+    if (estErreurSuspensionAdmin(erreur)) {
+      return { ok: false, erreur: 'interdit' }
+    }
+    const code =
+      erreur instanceof Prisma.PrismaClientKnownRequestError ? erreur.code : 'INCONNU'
+    console.error('[admin-moderation] decision', {
+      signalementId: parse.data.signalementId,
+      code,
+    })
+    return { ok: false, erreur: 'inconnue' }
+  }
+}
+
+/**
+ * Rétablit un message masqué. L'action ajoute une ligne append-only ; elle ne
+ * modifie jamais le message. Une réauthentification récente est exigée et
+ * chaque rétablissement est audité.
+ */
+export async function retablirMessage(payload: {
+  messageId: number
+  motif: string
+  noteInterne?: string
+}): Promise<ResultatRetablissement> {
+  const session = await requireAdmin()
+
+  if (!(await reauthAdminValide(session.userId))) {
+    return { ok: false, erreur: 'reauth' }
+  }
+
+  const brut = payload ?? {}
+  const parse = schemaRetablissementMessage.safeParse({
+    messageId: brut.messageId,
+    motif: brut.motif,
+    noteInterne: brut.noteInterne ?? undefined,
+  })
+  if (!parse.success) return { ok: false, erreur: 'inconnue' }
+
+  try {
+    const message = await prisma.message.findUnique({
+      where: { id: parse.data.messageId },
       select: { id: true },
     })
-    if (signalement !== null) {
+    if (message === null) return { ok: false, erreur: 'inconnue' }
+
+    const derniere = await prisma.messageModeration.findFirst({
+      where: { messageId: message.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { action: true },
+    })
+    if (derniere?.action !== 'masquage') {
       return { ok: true, deja: true }
     }
-    return { ok: false, erreur: 'inconnue' }
+
+    const note = notePropre(parse.data.noteInterne)
+    await prisma.$transaction(async (tx) => {
+      await consignerAudit(tx, {
+        acteurId: session.userId,
+        action: 'retablissement_message',
+        cibleType: 'message',
+        cibleId: message.id,
+        motif: parse.data.motif,
+        commentaire: note,
+      })
+      await tx.messageModeration.create({
+        data: {
+          messageId: message.id,
+          acteurId: session.userId,
+          action: 'retablissement',
+          motif: parse.data.motif,
+          noteInterne: note,
+        },
+      })
+    })
+
+    return { ok: true, deja: false }
   } catch (erreur) {
-    // 5) Erreur DB inattendue (panne, FK, timeout) : le code Prisma est utile
-    //    au diagnostic, la NOTE et l'identité ne le sont JAMAIS — on ne
-    //    journalise ni note, ni nom, ni email. `erreur.code` n'existe que
-    //    sur les erreurs connues Prisma : ailleurs, un libellé neutre.
-    const code = erreur instanceof Prisma.PrismaClientKnownRequestError ? erreur.code : 'INCONNU'
-    console.error('[admin-messagerie] cloture', { signalementId: parse.data.signalementId, code })
+    const code =
+      erreur instanceof Prisma.PrismaClientKnownRequestError ? erreur.code : 'INCONNU'
+    console.error('[admin-moderation] retablissement', {
+      messageId: parse.data.messageId,
+      code,
+    })
     return { ok: false, erreur: 'inconnue' }
   }
 }

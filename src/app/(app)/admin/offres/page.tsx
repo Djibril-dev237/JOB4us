@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 import { IconBriefcase } from '@/components/icons'
+import { requireAdmin } from '@/lib/dal'
 import { compterOffresPourAdmin, listerOffresPourAdmin } from '@/lib/offres-admin-dal'
-import { verifyRole } from '@/lib/dal'
 import { messageErreurTransition, messageMaj } from '@/lib/offres-labels'
 
 import { Bandeau } from './bandeau'
@@ -17,8 +17,8 @@ import { LigneOffreAdmin } from './ligne-offre'
 // rapport, coût d'un correctif estimé à une liste blanche de paramètres +
 // un `where` conditionnel + un `take/skip` dans offres-admin-dal.ts).
 //
-// Garde : verifyRole('admin') AVANT toute donnée (le proxy ne fait qu'un
-// contrôle optimiste sur le préfixe /admin). Pas d'`entrepriseDuCompte` :
+// Garde : requireAdmin() AVANT toute donnée (le proxy ne fait qu'un contrôle
+// optimiste sur le préfixe /admin). Pas d'`entrepriseDuCompte` :
 // l'admin voit tout, c'est tout l'objet de la page.
 //
 // Requêtes : UNE findMany (jointures entreprise + catégorie incluses, donc
@@ -41,7 +41,7 @@ const CLASSE_LIBELLE = 'mt-1 text-xs font-medium text-ink-muted'
 export default async function PageAdminOffres({
   searchParams,
 }: PageProps<'/admin/offres'>) {
-  await verifyRole('admin')
+  await requireAdmin()
 
   // `searchParams` peut porter des tableaux (?maj=a&maj=b) : ces clés sont
   // alors ignorées, cohérent avec le fail-closed des deux helpers.

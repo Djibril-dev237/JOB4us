@@ -4,44 +4,37 @@ import { notFound } from 'next/navigation'
 
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { TEXTES_MODERATION } from '@/lib/admin-moderation-texts'
+import { accesSignalementValide, reauthAdminValide } from '@/lib/admin-reauth'
 import { LIBELLES_STATUT, VARIANTE_STATUT } from '@/lib/candidatures-labels'
-import { verifyRole } from '@/lib/dal'
+import { requireAdmin } from '@/lib/dal'
 import { TEXTES, libelleStatutSignalement } from '@/lib/messagerie-labels'
 import { MAX_IDENTIFIANT } from '@/lib/messagerie-schemas'
+import { libelleDecision, libelleMotif } from '@/lib/moderation-labels'
 import { prisma } from '@/lib/prisma'
 
 import { FORMATEUR_DATE, FORMATEUR_DATE_HEURE } from '../affichage'
 import { Bandeau } from '../bandeau'
 
-import { CloturerSignalement } from './cloturer'
+import { AccesSignalementForm, DecisionSignalementForm, RetablirMessageForm } from './formulaires'
 
-// ─── Détail d'un signalement — /admin/signalements/[signalementId] (SA-8) ────
+// ─── Détail d'un signalement — /admin/signalements/[signalementId] (M10) ─────
 //
-// Contrôles dans l'ordre imposé (motif M6/M7) :
-//   1) rôle autoritaire `verifyRole('admin')` → autre rôle → /unauthorized ;
-//   2) id strict : entier strictement positif ET borné `MAX_IDENTIFIANT`,
-//      sinon `notFound()` — même 404 qu'une ligne absente (un id géant
-//      ferait échouer Prisma hors de toute gestion : critère « zéro 500 ») ;
-//   3) `signalement` absent → `notFound()`.
+// Contrôles dans l'ordre imposé :
+//   1) `requireAdmin()` : visiteur, non-admin, admin suspendu ou admin sans
+//      TOTP reçoivent le MÊME 404 strict, sans redirection révélatrice ;
+//   2) id strict : entier positif borné `MAX_IDENTIFIANT`, sinon `notFound()` ;
+//   3) métadonnées seules : aucune requête sur `Message.contenu` avant que le
+//      grant de signalement ne soit valide.
 //
-// JOURNALISATION AVANT TOUT RENDU, NON BEST-EFFORT : la consultation d'un
-// signalement (donc d'une conversation privée) est un acte sensible —
-// `AuditConversation.create` est ATTENDU avant le moindre rendu et SANS
-// try/catch : si l'écriture échoue, la page échoue. Une consultation non
-// journalisée n'a pas lieu d'être affichée (Étape 2 de la modération).
-// Ce n'est PAS le comportement de `marquerConversationLue` (best-effort) :
-// là, l'absence de trace invalide la mission même de l'écran.
+// Procédure de consultation privée :
+//   * l'admin choisit un motif fermé et se réauthentifie ;
+//   * l'action écrit l'audit AVANT de délivrer un cookie signé de 5 minutes ;
+//   * la page ne charge les 30 messages de contexte qu'avec ce grant.
 //
-// Contexte : les 30 derniers messages de la conversation, ordre ASC
-// chronologique ; le message signalé est surligné (bordure + fond) — le
-// contenu reste du TEXTE BRUT rendu comme dans `fil-messages.tsx`, JAMAIS
-// de `dangerouslySetInnerHTML` (React échappe toute interpolation).
-//
-// Clôture : le composant client `CloturerSignalement` est rendu TOUJOURS
-// (il décide de son propre rendu) pour que son bandeau de retour survive à
-// `router.refresh()` ; le bloc « traité » (note, modérateur, date) n'apparaît
-// qu'une fois le statut `traite`. Aucun texte hors TEXTES : noms, dates et
-// extraits sont des DONNÉES, jamais des libellés inventés.
+// Une décision exige en plus le grant : on ne décide pas d'un contenu qu'on
+// n'a pas été autorisé à consulter. Le masquage et la suspension sont des
+// écritures append-only/auditées ; aucune suppression physique n'existe ici.
 // ---------------------------------------------------------------------------
 
 export const metadata: Metadata = {
@@ -54,25 +47,33 @@ const CONTEXTE_MAX = 30
 export default async function PageSignalement({
   params,
 }: PageProps<'/admin/signalements/[signalementId]'>) {
-  // 1. Rôle autoritaire (la session est vérifiée AVANT la moindre lecture).
-  const session = await verifyRole('admin')
+  // 1. Garde administrateur stricte, AVANT toute lecture.
+  const session = await requireAdmin()
 
-  // 2. id strict (Next 16 : `params` est résolu) — bornage M8 « zéro 500 ».
+  // 2. id strict (Next 16 : `params` est résolu).
   const { signalementId } = await params
   const id = Number(signalementId)
   if (!Number.isInteger(id) || id <= 0 || id > MAX_IDENTIFIANT) notFound()
 
-  // 3. Lecture complète du signalement + de son contexte de conversation,
-  //    en NOMBRE FIXE de requêtes (une seule, jointures incluses).
+  // 3. Métadonnées seules. `contenu` n'est volontairement pas sélectionné.
   const signalement = await prisma.signalement.findUnique({
     where: { id },
-    include: {
+    select: {
+      id: true,
+      messageId: true,
+      motif: true,
+      statut: true,
+      decision: true,
+      motifDecision: true,
+      noteInterne: true,
+      createdAt: true,
+      traiteLe: true,
       auteur: { select: { name: true } },
       traitePar: { select: { name: true } },
       message: {
         select: {
           id: true,
-          contenu: true,
+          senderId: true,
           createdAt: true,
           conversation: {
             select: {
@@ -101,73 +102,71 @@ export default async function PageSignalement({
   })
   if (signalement === null) notFound()
 
-  // 4. JOURNALISATION — ATTENDUE avant tout rendu, jamais best-effort : si
-  //    cette écriture échoue, la page échoue (aucune consultation privée
-  //    affichée sans trace d'audit).
-  await prisma.auditConversation.create({
-    data: {
-      conversationId: signalement.message.conversation.id,
-      acteurId: session.userId,
-      signalementId: signalement.id,
-    },
-  })
+  // 4. État des deux grants. Le grant de signalement est lié à l'admin et au
+  //    signalement ; la réauthentification est une fenêtre séparée de 5 min.
+  const [acces, reauth] = await Promise.all([
+    accesSignalementValide(session.userId, signalement.id),
+    reauthAdminValide(session.userId),
+  ])
 
-  // 5. Contexte : 30 derniers messages (DESC) renversés en ASC — Prisma ne
-  //    sait pas « 30 derniers ASC » en une seule requête, d'où le renversement.
+  const cheminRetour = `/admin/signalements/${signalement.id}`
   const conversationId = signalement.message.conversation.id
-  const selectContexte = {
-    id: true,
-    contenu: true,
-    senderId: true,
-    createdAt: true,
-  } as const
-  const derniers = await prisma.message.findMany({
-    where: { conversationId },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: CONTEXTE_MAX,
-    select: selectContexte,
-  })
-  // Si le message signalé est PLUS ANCIEN que la fenêtre (vieille
-  // conversation), on la recale pour qu'elle se termine SUR le message
-  // signalé : l'extrait doit CONTENIR la cible, sinon rien n'est surligné.
-  const fenetre = derniers.some((message) => message.id === signalement.messageId)
-    ? derniers
-    : await prisma.message.findMany({
-        where: {
-          conversationId,
-          // Plafond LEXICOGRAPHIQUE (createdAt, id) et non `lte` simple :
-          // un message de même horodatage mais d'id SUPÉRIEUR trierait
-          // avant la cible (ordre `id desc`) et pourrait l'expulser de la
-          // fenêtre de 30 — la cible doit toujours être incluse, sinon
-          // rien n'est surligné dans l'extrait.
-          OR: [
-            { createdAt: { lt: signalement.message.createdAt } },
-            {
-              createdAt: signalement.message.createdAt,
-              id: { lte: signalement.messageId },
-            },
-          ],
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: CONTEXTE_MAX,
-        select: selectContexte,
-      })
-  const contexte = [...fenetre].reverse()
-
-  // 6. Métadonnées de conversation : participants (noms) et expéditeur de
-  //    chaque message — les deux seuls participants d'une conversation sont
-  //    le candidat et le propriétaire courant de l'offre (modèle M8 : les
-  //    participants se dérivent de la candidature, jamais copiés).
   const { candidature } = signalement.message.conversation
   const { offre } = candidature
+
+  // 5. Contenu privé : UNIQUEMENT avec le grant. La fenêtre est calée sur le
+  //    message signalé pour qu'il soit toujours visible, même ancien.
+  const contexte = acces
+    ? await (async () => {
+        const selectContexte = {
+          id: true,
+          contenu: true,
+          senderId: true,
+          createdAt: true,
+        } as const
+        const derniers = await prisma.message.findMany({
+          where: { conversationId },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: CONTEXTE_MAX,
+          select: selectContexte,
+        })
+        const fenetre = derniers.some((message) => message.id === signalement.messageId)
+          ? derniers
+          : await prisma.message.findMany({
+              where: {
+                conversationId,
+                OR: [
+                  { createdAt: { lt: signalement.message.createdAt } },
+                  {
+                    createdAt: signalement.message.createdAt,
+                    id: { lte: signalement.messageId },
+                  },
+                ],
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              take: CONTEXTE_MAX,
+              select: selectContexte,
+            })
+        return [...fenetre].reverse()
+      })()
+    : null
+
+  // 6. État de masquage du message signalé : la DERNIÈRE ligne de modération
+  //    décide. Une requête ciblée, aucun contenu.
+  const derniereModeration = acces
+    ? await prisma.messageModeration.findFirst({
+        where: { messageId: signalement.messageId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { action: true },
+      })
+    : null
+  const messageMasque = derniereModeration?.action === 'masquage'
+
   const nomsParticipants = new Map<number, string>([
     [candidature.candidat.user.id, candidature.candidat.user.name],
     [offre.entreprise.user.id, offre.entreprise.user.name],
   ])
 
-  // Lien vers l'offre UNIQUEMENT si elle est encore consultable (motif de
-  // carte-candidature : slug présent et offre non retirée) — jamais de lien
-  // mort vers une fiche supprimée.
   const hrefOffre =
     offre.slug !== null && offre.deletedAt === null ? `/offres/${offre.slug}` : null
 
@@ -177,11 +176,8 @@ export default async function PageSignalement({
         {TEXTES.titreSignalements}
       </h1>
 
-      {/* Rappel permanent : toute consultation de cette page est journalisée. */}
-      <Bandeau variante="info" message={TEXTES.moderationLue} />
+      {acces ? <Bandeau variante="info" message={TEXTES.moderationLue} /> : null}
 
-      {/* Carte du signalement : motif (donnée saisi par le signalant),
-          auteur, statut et date de création. */}
       <Card>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={signalement.statut === 'ouvert' ? 'warn' : 'neutral'}>
@@ -195,91 +191,117 @@ export default async function PageSignalement({
         <h2 className="mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           {TEXTES.motifSignalement}
         </h2>
-        {/* Texte brut échappé par React : aucun balisage rendu, aucun
-            `dangerouslySetInnerHTML`. */}
         <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm text-ink">
           {signalement.motif}
         </p>
 
-        {/* Auteur du signalement (donnée, pas un libellé). */}
         <p className="mt-4 min-w-0 break-words text-sm text-ink-muted">
           {signalement.auteur.name}
         </p>
       </Card>
 
-      {/* Contexte de la conversation : participants, statut de la
-          candidature, offre, puis les messages (message signalé surligné). */}
-      <section
-        aria-labelledby="titre-contexte"
-        className="min-w-0 rounded-md border border-line bg-surface p-5 shadow-card"
-      >
-        <h2 id="titre-contexte" className="min-w-0 break-words text-base font-bold text-ink">
-          {offre.titre}
-        </h2>
-
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
-          <span className="min-w-0 break-words">{candidature.candidat.user.name}</span>
-          <span aria-hidden="true">·</span>
-          <span className="min-w-0 break-words">{offre.entreprise.user.name}</span>
-          <span aria-hidden="true">·</span>
-          {/* Statut de la candidature : labels partagés M7 (source unique),
-              jamais de libellé recopié ici. */}
-          <Badge variant={VARIANTE_STATUT[candidature.statut]}>
-            {LIBELLES_STATUT[candidature.statut]}
-          </Badge>
-        </p>
-
-        {hrefOffre !== null ? (
-          <Link
-            href={hrefOffre}
-            className="mt-2 inline-flex text-sm font-medium text-brand transition-colors duration-fast hover:text-brand-dark"
+      {!acces ? (
+        <AccesSignalementForm
+          signalementId={signalement.id}
+          reauth={reauth}
+          cheminRetour={cheminRetour}
+        />
+      ) : (
+        <>
+          <section
+            aria-labelledby="titre-contexte"
+            className="min-w-0 rounded-md border border-line bg-surface p-5 shadow-card"
           >
-            {TEXTES.lienOffre}
-          </Link>
-        ) : null}
+            <h2 id="titre-contexte" className="text-base font-bold text-ink">
+              {TEXTES_MODERATION.contexteTitre}
+            </h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              {TEXTES_MODERATION.conversationPriveeAide}
+            </p>
 
-        <ul className="mt-4 space-y-3">
-          {contexte.map((message) => {
-            const signale = message.id === signalement.messageId
-            return (
-              <li
-                key={message.id}
-                // Message signalé : bordure + fond « danger » — surlignage
-                // purement CSS, le contenu reste du texte brut.
-                className={`min-w-0 rounded-md border px-3 py-2 ${
-                  signale ? 'border-danger bg-danger-tint' : 'border-line bg-surface-alt'
-                }`}
-              >
-                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                  <span className="min-w-0 break-words text-xs font-semibold text-ink">
-                    {nomsParticipants.get(message.senderId) ?? ''}
-                  </span>
-                  <time
-                    dateTime={message.createdAt.toISOString()}
-                    className="shrink-0 text-xs text-ink-muted"
-                  >
-                    {FORMATEUR_DATE.format(message.createdAt)}
-                  </time>
-                </div>
-                <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm text-ink">
-                  {message.contenu}
-                </p>
-              </li>
-            )
-          })}
-        </ul>
-      </section>
+            <div className="mt-3 border-t border-line pt-3">
+              <h3 className="min-w-0 break-words text-sm font-bold text-ink">
+                {offre.titre}
+              </h3>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+                <span className="min-w-0 break-words">{candidature.candidat.user.name}</span>
+                <span aria-hidden="true">·</span>
+                <span className="min-w-0 break-words">{offre.entreprise.user.name}</span>
+                <span aria-hidden="true">·</span>
+                <Badge variant={VARIANTE_STATUT[candidature.statut]}>
+                  {LIBELLES_STATUT[candidature.statut]}
+                </Badge>
+              </p>
 
-      {/* Formulaire de clôture (client) : rendu TOUJOURS — il ne montre le
-          formulaire que si le signalement est encore ouvert, et conserve son
-          bandeau de retour après `router.refresh()`. */}
-      <CloturerSignalement signalementId={signalement.id} statut={signalement.statut} />
+              {hrefOffre !== null ? (
+                <Link
+                  href={hrefOffre}
+                  className="mt-2 inline-flex text-sm font-medium text-brand transition-colors duration-fast hover:text-brand-dark"
+                >
+                  {TEXTES.lienOffre}
+                </Link>
+              ) : null}
+            </div>
 
-      {/* Signalement déjà traité (à l'ouverture ou après clôture) : statut,
-          note interne, modérateur et date — AUCUN formulaire. */}
+            {contexte === null || contexte.length === 0 ? (
+              <p className="mt-4 text-sm text-ink-muted">{TEXTES_MODERATION.contexteVide}</p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {contexte.map((message) => {
+                  const signale = message.id === signalement.messageId
+                  return (
+                    <li
+                      key={message.id}
+                      className={`min-w-0 rounded-md border px-3 py-2 ${
+                        signale ? 'border-danger bg-danger-tint' : 'border-line bg-surface-alt'
+                      }`}
+                    >
+                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 break-words text-xs font-semibold text-ink">
+                          {nomsParticipants.get(message.senderId) ?? ''}
+                          {signale ? (
+                            <span className="ml-2 text-danger">
+                              {TEXTES_MODERATION.messageSignale}
+                            </span>
+                          ) : null}
+                        </span>
+                        <time
+                          dateTime={message.createdAt.toISOString()}
+                          className="shrink-0 text-xs text-ink-muted"
+                        >
+                          {FORMATEUR_DATE_HEURE.format(message.createdAt)}
+                        </time>
+                      </div>
+                      <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm text-ink">
+                        {message.contenu}
+                      </p>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+
+          {signalement.statut === 'ouvert' ? (
+            <DecisionSignalementForm
+              signalementId={signalement.id}
+              statut={signalement.statut}
+              cheminRetour={cheminRetour}
+            />
+          ) : null}
+
+          <RetablirMessageForm
+            messageId={signalement.messageId}
+            masque={messageMasque}
+            cheminRetour={cheminRetour}
+          />
+        </>
+      )}
+
       {signalement.statut === 'traite' ? (
         <Card>
-          <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base font-bold text-ink">{TEXTES_MODERATION.traiteTitre}</h2>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <Badge variant="neutral">{libelleStatutSignalement('traite')}</Badge>
             {signalement.traiteLe !== null ? (
               <time
@@ -289,20 +311,39 @@ export default async function PageSignalement({
                 {FORMATEUR_DATE_HEURE.format(signalement.traiteLe)}
               </time>
             ) : null}
-            {/* Modérateur : le NOM est une donnée (aucun libellé inventé). */}
             {signalement.traitePar !== null ? (
               <span className="min-w-0 break-words text-xs text-ink-muted">
-                {signalement.traitePar.name}
+                {TEXTES_MODERATION.traitePar} {signalement.traitePar.name}
               </span>
             ) : null}
           </div>
 
-          <h2 className="mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            {TEXTES.noteInterne}
-          </h2>
-          <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm text-ink">
-            {signalement.noteInterne ?? '—'}
-          </p>
+          <dl className="mt-4 space-y-2 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                {TEXTES_MODERATION.decisionChamp}
+              </dt>
+              <dd className="mt-0.5 text-ink">{libelleDecision(signalement.decision)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                {TEXTES_MODERATION.motifChamp}
+              </dt>
+              <dd className="mt-0.5 text-ink">
+                {signalement.motifDecision === null
+                  ? TEXTES_MODERATION.nonRenseigne
+                  : libelleMotif(signalement.motifDecision)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                {TEXTES.noteInterne}
+              </dt>
+              <dd className="mt-0.5 min-w-0 whitespace-pre-wrap break-words text-ink">
+                {signalement.noteInterne ?? TEXTES_MODERATION.nonRenseignee}
+              </dd>
+            </div>
+          </dl>
         </Card>
       ) : null}
     </div>

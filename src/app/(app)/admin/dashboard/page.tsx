@@ -1,16 +1,19 @@
 import type { Metadata } from 'next'
 
+import { requireAdmin } from '@/lib/dal'
+
 export const metadata: Metadata = {
   title: 'Tableau de bord',
 }
 
 // ─── Coquille du tableau de bord administrateur ──────────────────────────────
-// Shell validé en M2 v2 (navbar + sidebar) ; le contenu réel sera construit
-// dans les modules d'administration. Ici : aucune donnée affichée (zéro
-// métrique inventée). Protection : proxy optimiste (prefixe /admin) — pages
-// strictement synchrones en attendant un arbitrage sur le bug upstream #98097.
+// Le contenu réel (métriques issues de requêtes réelles) arrive à la vague 3.
+// En attendant, la garde serveur `requireAdmin()` est déjà autoritaire : le
+// proxy ne fait qu'un contrôle optimiste sur le préfixe /admin.
 // ---------------------------------------------------------------------------
-export default function AdminDashboard() {
+export default async function AdminDashboard() {
+  await requireAdmin()
+
   return (
     <div className="max-w-3xl">
       <h1 className="text-2xl font-bold tracking-tight text-ink">Tableau de bord</h1>

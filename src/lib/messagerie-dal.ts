@@ -3,6 +3,7 @@ import 'server-only'
 import { Prisma } from '@prisma/client'
 import type { StatutCandidature, StatutOffre } from '@prisma/client'
 
+import { TEXTE_MESSAGE_MASQUE } from '@/lib/moderation-labels'
 import { prisma } from '@/lib/prisma'
 
 // ─── Couche d'accès aux données de la MESSAGERIE (M8, Vague 1) ──────────────
@@ -39,6 +40,31 @@ import { prisma } from '@/lib/prisma'
 
 /** Taille d'une page de messages (constante EXPORTÉE : pagination testable). */
 export const PAGE = 30
+
+/**
+ * Identifiants des messages dont la DERNIÈRE ligne de modération est un
+ * masquage. Une requête pour toute la page, jamais une par message. Le
+ * journal est append-only : la ligne la plus récente (createdAt, id) décide.
+ */
+async function idsMessagesMasques(messageIds: number[]): Promise<Set<number>> {
+  if (messageIds.length === 0) return new Set()
+  const lignes = await prisma.messageModeration.findMany({
+    where: { messageId: { in: messageIds } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { messageId: true, action: true },
+  })
+  const derniereParMessage = new Map<number, 'masquage' | 'retablissement'>()
+  for (const ligne of lignes) {
+    if (!derniereParMessage.has(ligne.messageId)) {
+      derniereParMessage.set(ligne.messageId, ligne.action)
+    }
+  }
+  return new Set(
+    [...derniereParMessage.entries()]
+      .filter(([, action]) => action === 'masquage')
+      .map(([messageId]) => messageId),
+  )
+}
 
 // ─── Contrats de retour (API figée — les vagues suivantes codent dessus) ────
 
@@ -254,7 +280,7 @@ export async function listerConversations(
       messages: {
         orderBy: { createdAt: 'desc' },
         take: 1,
-        select: { contenu: true, senderId: true, createdAt: true },
+        select: { id: true, contenu: true, senderId: true, createdAt: true },
       },
     },
     orderBy: { id: 'desc' },
@@ -310,6 +336,13 @@ export async function listerConversations(
     }
   }
 
+  // Requête 4 : masquages des aperçus. L'aperçu est un contenu comme un
+  // autre : un message masqué ne doit jamais réapparaître dans la liste.
+  const idsApercus = visibles
+    .map((conversation) => conversation.messages[0]?.id)
+    .filter((id): id is number => typeof id === 'number')
+  const masques = await idsMessagesMasques(idsApercus)
+
   return visibles.map((conversation) => {
     const candidature = conversation.candidature
     const dernier = conversation.messages[0] ?? null
@@ -324,7 +357,11 @@ export async function listerConversations(
       dernierMessage:
         dernier === null
           ? null
-          : { contenu: dernier.contenu, emetteurId: dernier.senderId, createdAt: dernier.createdAt },
+          : {
+              contenu: masques.has(dernier.id) ? TEXTE_MESSAGE_MASQUE : dernier.contenu,
+              emetteurId: dernier.senderId,
+              createdAt: dernier.createdAt,
+            },
       nonLus: nonLusParConversation.get(conversation.id) ?? 0,
     }
   })
@@ -374,17 +411,21 @@ export async function lireMessagesParCurseur(
   // adjacents au curseur, ce qui interdit toute lacune à la jonction des
   // pages), le 31e — le plus ancien — n'existant que pour prouver qu'une
   // page plus ancienne existe (aPlusAncien).
-  const page = bruts
-    .slice(0, PAGE)
-    .reverse()
-    .map((message) => ({
+  const page = bruts.slice(0, PAGE).reverse()
+
+  // Requête 2 : masquages de la page. Le contenu d'origine ne quitte jamais
+  // la base pour un participant ; le texte neutre est la seule valeur rendue.
+  const masques = await idsMessagesMasques(page.map((message) => message.id))
+
+  return {
+    messages: page.map((message) => ({
       id: message.id,
-      contenu: message.contenu,
+      contenu: masques.has(message.id) ? TEXTE_MESSAGE_MASQUE : message.contenu,
       emetteurId: message.senderId,
       createdAt: message.createdAt,
-    }))
-
-  return { messages: page, aPlusAncien }
+    })),
+    aPlusAncien,
+  }
 }
 
 // ─── Accusé de lecture (ConversationEtat uniquement) ────────────────────────

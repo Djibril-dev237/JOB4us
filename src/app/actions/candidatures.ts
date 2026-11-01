@@ -360,21 +360,27 @@ export async function retirerCandidature(formData: FormData): Promise<void> {
 }
 
 /**
- * CHANGER le statut d'une candidature (recruteur OU admin).
+ * CHANGER le statut d'une candidature (recruteur uniquement).
+ *
+ * M10 retire l'admin de cette transition métier : l'administration ne modifie
+ * jamais une candidature. Le recruteur reste borné par la jointure
+ * `offre → entreprise → userId` posée DANS le `where` de la lecture ET dans
+ * celui du CAS.
  *
  * Ordre imposé : 1) rôle → 2) id → 3) cible (schéma) → 4) ownership + statut
  * courant EN UNE requête → 5) matrice → 6) CAS + audit `transition` (MÊME
  * `$transaction`, fail-closed) → 7) événement + redirect.
- *
- * Le recruteur est borné par la jointure `offre → entreprise → userId` posée
- * DANS le `where` de la lecture ET dans celui du CAS ; l'admin, lui, n'a
- * aucun périmètre (lecture globale déjà ouverte par `verifyRole`, décision
- * étape 2) — mais reste soumis à la matrice comme tout acteur.
  */
 export async function changerStatutCandidature(formData: FormData): Promise<void> {
-  // 1) RÔLE : l'acteur décide de la transition, pas l'URL.
-  const session = await verifyRole('recruteur', 'admin')
-  const acteur: ActeurCandidature = session.role
+  // 1) RÔLE : l'acteur décide de la transition, pas l'URL. La garde
+  //    verifyRole est complétée par une vérification explicite : même si un
+  //    double de test (ou une future régression) la contournait, un rôle non
+  //    recruteur ne peut pas atteindre la matrice.
+  const session = await verifyRole('recruteur')
+  if (session.role !== 'recruteur') {
+    redirect('/unauthorized')
+  }
+  const acteur: ActeurCandidature = 'recruteur'
 
   // 2) id : champ caché, même 404 que l'absence de ligne.
   const id = idCandidatureDepuis(formData)
@@ -391,16 +397,10 @@ export async function changerStatutCandidature(formData: FormData): Promise<void
 
   // 4) Ownership + statut courant EN UNE seule requête (select liste
   //    blanche) : `null` → 404, identique pour une ligne d'un autre compte.
-  const ligne =
-    acteur === 'recruteur'
-      ? await prisma.candidature.findFirst({
-          where: { id, offre: { entreprise: { userId: session.userId } } },
-          select: SELECT_CONTROLE_TRANSITION,
-        })
-      : await prisma.candidature.findUnique({
-          where: { id },
-          select: SELECT_CONTROLE_TRANSITION,
-        })
+  const ligne = await prisma.candidature.findFirst({
+    where: { id, offre: { entreprise: { userId: session.userId } } },
+    select: SELECT_CONTROLE_TRANSITION,
+  })
   if (ligne === null) {
     notFound()
   }
@@ -422,9 +422,7 @@ export async function changerStatutCandidature(formData: FormData): Promise<void
       where: {
         id,
         statut: ligne.statut,
-        ...(acteur === 'recruteur'
-          ? { offre: { entreprise: { userId: session.userId } } }
-          : {}),
+        offre: { entreprise: { userId: session.userId } },
       },
       data: { statut: vers },
     })
@@ -462,8 +460,8 @@ export async function changerStatutCandidature(formData: FormData): Promise<void
 /**
  * Passer `envoyee` → `consultee` : appelée par les PAGES serveur (recruteur)
  * à l'ouverture d'une fiche — JAMAIS un bouton. L'acteur de ce passage est
- * le SERVEUR lui-même (matrice : recruteur/admin), pas une action exposée au
- * client : aucun formulaire ne peut l'invoquer.
+ * le SERVEUR lui-même (matrice : recruteur), pas une action exposée au
+ * client : aucun formulaire ne peut l'invoquer. M10 exclut l'admin.
  *
  * GARDE D'AUTORISATION (revue M7, P1-1) : toute export d'un fichier
  * 'use server' est un point d'entrée HTTP invocable en POST direct — le
@@ -481,21 +479,20 @@ export async function changerStatutCandidature(formData: FormData): Promise<void
  *
  * Aucun hook M8/M9 ici (cette page n’en déclenche aucun) ; l’audit
  * `transition` (`envoyee → consultee`, acteur = `session.userId`, le compte
- * recruteur/admin dont la session a ouvert la page) s’écrit DANS la
+ * recruteur dont la session a ouvert la page) s’écrit DANS la
  * `$transaction`, sur le CAS ci-dessous : best-effort ATOMIQUE — un échec
  * d’audit annule d’abord la mutation, puis est absorbé par le try/catch.
  */
 export async function marquerConsultee(candidatureId: number): Promise<void> {
   try {
-    const session = await verifyRole('recruteur', 'admin')
+    const session = await verifyRole('recruteur')
+    if (session.role !== 'recruteur') return
     await prisma.$transaction(async (tx) => {
       const verdict = await tx.candidature.updateMany({
         where: {
           id: candidatureId,
           statut: 'envoyee',
-          ...(session.role === 'recruteur'
-            ? { offre: { entreprise: { userId: session.userId } } }
-            : {}),
+          offre: { entreprise: { userId: session.userId } },
         },
         data: { statut: 'consultee' },
       })

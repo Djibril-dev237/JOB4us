@@ -66,6 +66,7 @@ vi.mock('@/lib/prisma', () => ({
       updateMany: conversationEtatUpdateMany,
     },
     message: { create: messageCreate, findMany: vi.fn(), findFirst: vi.fn() },
+    messageModeration: { findMany: vi.fn(async () => []) },
   },
 }))
 

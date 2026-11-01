@@ -2,9 +2,11 @@
 
 import { notFound, redirect } from 'next/navigation'
 
-import { verifyRole } from '@/lib/dal'
+import { reauthAdminValide } from '@/lib/admin-reauth'
+import { requireAdmin } from '@/lib/dal'
 import { offreIndisponible } from '@/lib/evenements-offres'
 import { formDataString } from '@/lib/form-errors'
+import { consignerAudit } from '@/lib/journal-audit'
 import { lireOffrePourAdmin } from '@/lib/offres-dal'
 import { prisma } from '@/lib/prisma'
 
@@ -57,13 +59,25 @@ function identifierOffre(formData: FormData): number {
  * dans le where : l'admin voit toutes les offres.
  */
 export async function suspendreOffre(formData: FormData): Promise<void> {
-  await verifyRole('admin')
+  const session = await requireAdmin()
+  if (!(await reauthAdminValide(session.userId))) {
+    redirect('/admin/reauth?retour=%2Fadmin%2Foffres')
+  }
 
   const id = identifierOffre(formData)
   const offre = await lireOffrePourAdmin(id)
   if (offre === null) {
     notFound()
   }
+
+  // Trace AVANT l'effet : une suspension sans audit n'a pas lieu d'être.
+  await consignerAudit(prisma, {
+    acteurId: session.userId,
+    action: 'suspension_offre',
+    cibleType: 'offre',
+    cibleId: id,
+    motif: 'autre',
+  })
 
   const resultat = await prisma.offre.updateMany({
     where: { id, deletedAt: null, statut: { in: ['publiee', 'brouillon', 'cloturee'] } },
@@ -90,13 +104,24 @@ export async function suspendreOffre(formData: FormData): Promise<void> {
  * relevé l'offre, count 0 → refus, sans jamais réécrire deux fois.
  */
 export async function releverOffre(formData: FormData): Promise<void> {
-  await verifyRole('admin')
+  const session = await requireAdmin()
+  if (!(await reauthAdminValide(session.userId))) {
+    redirect('/admin/reauth?retour=%2Fadmin%2Foffres')
+  }
 
   const id = identifierOffre(formData)
   const offre = await lireOffrePourAdmin(id)
   if (offre === null) {
     notFound()
   }
+
+  await consignerAudit(prisma, {
+    acteurId: session.userId,
+    action: 'reactivation_offre',
+    cibleType: 'offre',
+    cibleId: id,
+    motif: 'autre',
+  })
 
   const resultat = await prisma.offre.updateMany({
     where: { id, deletedAt: null, statut: 'suspendue' },

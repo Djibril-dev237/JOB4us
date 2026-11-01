@@ -4,7 +4,7 @@ import Link from 'next/link'
 
 import { Pagination } from '@/components/candidatures/pagination'
 import { IconFlag } from '@/components/icons'
-import { verifyRole } from '@/lib/dal'
+import { requireAdmin } from '@/lib/dal'
 import { TEXTES } from '@/lib/messagerie-labels'
 import { prisma } from '@/lib/prisma'
 
@@ -16,8 +16,8 @@ import { LigneSignalement, type SignalementLigne } from './ligne-signalement'
 // pages admin existantes (M6/M7), pas un ancêtre PHP.
 //
 // Contrôles, dans l'ordre imposé (motif M6/M7) :
-//   1) rôle autoritaire `verifyRole('admin')` AVANT toute lecture (le proxy
-//      ne fait qu'un contrôle optimiste sur le préfixe /admin) ;
+//   1) garde autoritaire `requireAdmin()` AVANT toute lecture (le proxy ne
+//      fait qu'un contrôle optimiste sur le préfixe /admin) ;
 //   2) `?statut=` : SEULE `traite` est reconnue (toute autre valeur ou
 //      paramètre répété = « ouverts », défaut) — fail-closed, comme le
 //      `?filtre=` de /messages ;
@@ -44,10 +44,10 @@ const SIGNALEMENTS_PAR_PAGE = 15
 
 /** Puce active (motif des puces de /messages, tokens M2). */
 const CLASSE_PUCE_ACTIVE =
-  'inline-flex h-8 items-center rounded-full border border-brand bg-brand px-3 text-sm font-medium text-white'
+  'inline-flex h-9 items-center rounded-sm border border-brand bg-brand px-3 text-sm font-medium text-white'
 
 const CLASSE_PUCE =
-  'inline-flex h-8 items-center rounded-full border border-line-strong bg-surface px-3 text-sm font-medium text-ink-muted transition-colors duration-fast hover:bg-surface-alt hover:text-ink'
+  'inline-flex h-9 items-center rounded-sm border border-line-strong bg-surface px-3 text-sm font-medium text-ink-muted transition-colors duration-fast hover:bg-surface-alt hover:text-ink'
 
 /**
  * Paramètre d'URL sous forme de chaîne UNIQUE — `?statut=a&statut=b`
@@ -72,8 +72,8 @@ function pageCourante(pageDemandee: string | null): number {
 export default async function PageSignalements({
   searchParams,
 }: PageProps<'/admin/signalements'>) {
-  // 1. Rôle (autoritaire) : toute autre direction part vers /unauthorized.
-  await verifyRole('admin')
+  // 1. Garde admin stricte : visiteur/non-admin reçoit le 404 du DAL.
+  await requireAdmin()
 
   // 2. Filtre : `?statut=traite` seul, tout le reste vaut « ouverts ».
   const params = await searchParams
@@ -89,11 +89,14 @@ export default async function PageSignalements({
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip: (page - 1) * SIGNALEMENTS_PAR_PAGE,
       take: SIGNALEMENTS_PAR_PAGE,
-      // Aucune jointure par ligne : auteur et extrait du message sont
-      // portés par la même requête (motif N+1 interdit, M7/M8).
-      include: {
+      // Aucune jointure par ligne et AUCUN contenu de message : la file ne
+      // montre que les métadonnées du signalement (M10).
+      select: {
+        id: true,
+        motif: true,
+        statut: true,
+        createdAt: true,
         auteur: { select: { name: true } },
-        message: { select: { contenu: true } },
       },
     }),
   ])
@@ -105,7 +108,6 @@ export default async function PageSignalements({
     statut: ligne.statut,
     createdAt: ligne.createdAt,
     auteurNom: ligne.auteur.name,
-    messageExtrait: ligne.message.contenu,
   }))
 
   return (

@@ -32,9 +32,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 //        derrière une session authentifiée). Dans les DEUX cas, le
 //        contenu n'est JAMAIS diffusé avant contrôle.
 //
-// MATRICE `?candidatId=` (rappel — seul l'admin est élargi par la règle
-// « lecture justifiée » ; l'annuaire recruteur supprimé n'offre aucun autre
-// chemin) :
+// MATRICE `?candidatId=` (M10 : l'admin n'a AUCUN accès aux CV ; la règle de
+// lecture justifiée ne s'applique qu'aux recruteurs liés par une candidature) :
 // | Acteur     | Condition                                | Résultat |
 // |------------|------------------------------------------|----------|
 // | visiteur   | aucun                                     | 401      |
@@ -42,7 +41,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 // | candidat   | CV d'un autre candidat                   | 403      |
 // | recruteur  | candidat postulé à UNE de ses offres      | 302      |
 // | recruteur  | aucune candidature à ses offres           | 403      |
-// | admin      | toujours                                 | 302      |
+// | admin      | toujours                                 | 403      |
 //
 // MATRICE `?candidature=` (M7) — le contrôle porte sur LA LIGNE de
 // candidature, relue en base en UNE seule requête (snapshot, propriétaire,
@@ -54,14 +53,14 @@ import { NextResponse, type NextRequest } from 'next/server'
 // | candidat   | candidature d'un autre candidat                  | 403      |
 // | recruteur  | la candidature vise UNE de ses offres            | 302      |
 // | recruteur  | aucune de ses offres                             | 403      |
-// | admin      | toujours                                         | 302      |
+// | admin      | toujours                                         | 403      |
 //
-// Journal : recruteur ou admin UNIQUEMENT, écrit AVANT toute diffusion —
+// Journal : recruteur UNIQUEMENT, écrit AVANT toute diffusion —
 // fail-closed : sans trace, pas d'URL signée ; la cible consignée est le
 // CANDIDAT propriétaire de la ligne. Le mode `?candidature=` écrit DEUX
 // traces dans ce cas, dans cet ordre : le journal d’accès (AccesFichier) puis
 // la ligne `consultation` d’AuditCandidature (src/lib/candidature-audit.ts,
-// acteur = userId du recruteur/admin) — échec de l’une ou de l’autre ⇒ aucune
+// acteur = userId du recruteur) — échec de l’une ou de l’autre ⇒ aucune
 // URL signée. AUCUNE écriture AuditCandidature en mode `?candidatId=` (profil
 // : pas de `candidatureId` possible, colonne non nullable) ni quand le
 // propriétaire candidat lit sa propre pièce jointe (le propriétaire n’est pas
@@ -124,11 +123,9 @@ async function serveProfil(raw: string, userId: number, role: Role): Promise<Nex
   // Matrice d'accès — évaluation en base, jamais depuis le payload client
   // (un champ `role`/`id` forgeé dans la requête n'est pas lu ici).
   let allowed = false
-  if (role === 'admin') {
-    allowed = true
-  } else if (role === 'candidat') {
+  if (role === 'candidat') {
     allowed = candidat.userId === userId
-  } else {
+  } else if (role === 'recruteur') {
     // recruteur : existence d'une candidature de CE candidat à UNE offres de
     // CE recruteur (entreprise du recruteur connecté), indépendamment du
     // statut (accès maintenu tant que la candidature existe — Étape 2).
@@ -142,7 +139,7 @@ async function serveProfil(raw: string, userId: number, role: Role): Promise<Nex
     return jsonError('Accès refusé.', 403)
   }
 
-  // Journal (matrice Étape 2) : recruteur ou admin UNIQUEMENT, écrit AVANT
+  // Journal (matrice Étape 2) : recruteur UNIQUEMENT, écrit AVANT
   // toute diffusion — fail-closed : sans trace, pas d'URL signée.
   if (role !== 'candidat') {
     await logCvAccess(userId, candidat.id)
@@ -183,11 +180,9 @@ async function serveCandidature(raw: string, userId: number, role: Role): Promis
   // Matrice d'accès — évaluation en base depuis LA LIGNE, jamais depuis le
   // payload client.
   let allowed = false
-  if (role === 'admin') {
-    allowed = true
-  } else if (role === 'candidat') {
+  if (role === 'candidat') {
     allowed = candidature.candidat.userId === userId
-  } else {
+  } else if (role === 'recruteur') {
     // recruteur : la candidature vise UNE de SES offres (entreprise du
     // recruteur connecté) — le lien est lu sur la ligne, pas déduit.
     allowed = candidature.offre.entreprise.userId === userId
@@ -196,7 +191,7 @@ async function serveCandidature(raw: string, userId: number, role: Role): Promis
     return jsonError('Accès refusé.', 403)
   }
 
-  // Journal (M7, mêmes règles que le profil) : recruteur ou admin UNIQUEMENT,
+  // Journal (M7, mêmes règles que le profil) : recruteur UNIQUEMENT,
   // écrit AVANT toute diffusion — fail-closed : sans trace, pas d'URL signée.
   // La cible consignée est le CANDIDAT propriétaire de la ligne.
   if (role !== 'candidat') {
