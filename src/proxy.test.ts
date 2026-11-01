@@ -245,22 +245,37 @@ describe('proxy M6 (gate par rôle restauré — P0)', () => {
     }
   })
 
-  it('répond 404 strict à un visiteur ou à un non-admin sur /admin', async () => {
-    const visiteur = await proxy(requeteAvecSession('/admin/dashboard', false))
-    expect(visiteur?.status).toBe(200)
-    expect(visiteur?.headers.get('x-middleware-rewrite')).toBe(
-      'http://localhost:3000/404',
-    )
-    expect(visiteur?.headers.get('location')).toBeNull()
+  it('répond 404 strict à un visiteur ou à un non-admin sur chaque route /admin', async () => {
+    const routesAdmin = [
+      '/admin/dashboard',
+      '/admin/utilisateurs',
+      '/admin/utilisateurs/7',
+      '/admin/offres',
+      '/admin/signalements',
+      '/admin/signalements/7',
+      '/admin/statistiques',
+      '/admin/audit',
+      '/admin/audit/export',
+      '/admin/reauth',
+    ]
 
-    for (const role of ['candidat', 'recruteur'] as const) {
-      connecte(role)
-      const reponse = await proxy(requeteAvecSession('/admin/dashboard'))
-      expect(reponse?.status).toBe(200)
-      expect(reponse?.headers.get('x-middleware-rewrite')).toBe(
+    for (const chemin of routesAdmin) {
+      const visiteur = await proxy(requeteAvecSession(chemin, false))
+      expect(visiteur?.status).toBe(200)
+      expect(visiteur?.headers.get('x-middleware-rewrite')).toBe(
         'http://localhost:3000/404',
       )
-      expect(reponse?.headers.get('location')).toBeNull()
+      expect(visiteur?.headers.get('location')).toBeNull()
+
+      for (const role of ['candidat', 'recruteur'] as const) {
+        connecte(role)
+        const reponse = await proxy(requeteAvecSession(chemin))
+        expect(reponse?.status).toBe(200)
+        expect(reponse?.headers.get('x-middleware-rewrite')).toBe(
+          'http://localhost:3000/404',
+        )
+        expect(reponse?.headers.get('location')).toBeNull()
+      }
     }
   })
 

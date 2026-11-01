@@ -174,6 +174,19 @@ describe('reauthentifierAdmin', () => {
     })
   })
 
+  it('non-admin : 404 avant le rate limit et toute vérification de code', async () => {
+    requireAdminMock.mockRejectedValueOnce(new Error('NEXT_NOT_FOUND'))
+
+    await expect(
+      reauthentifierAdmin({}, formDataCode('123456')),
+    ).rejects.toThrow('NEXT_NOT_FOUND')
+
+    expect(checkRateLimitMock).not.toHaveBeenCalled()
+    expect(verifierCodeSessionMock).not.toHaveBeenCalled()
+    expect(cookieSetMock).not.toHaveBeenCalled()
+    expect(auditMock).not.toHaveBeenCalled()
+  })
+
   it('refuse quand le seau de réauthentification est épuisé', async () => {
     checkRateLimitMock.mockReturnValue({ allowed: false, retryAfterMs: 60_000 })
     const resultat = await reauthentifierAdmin({}, formDataCode('123456'))
