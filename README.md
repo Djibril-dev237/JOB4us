@@ -1,36 +1,141 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Job4Us
 
-## Getting Started
+Plateforme d'emploi pour le Cameroun : offres, candidatures, messagerie,
+notifications et administration. L'application est construite avec Next.js App
+Router, Prisma et MySQL.
 
-First, run the development server:
+## Stack
+
+- Next.js 16.3.6 et React 19
+- TypeScript strict
+- Prisma 6 et MySQL 8
+- Auth.js v5 avec contrôle d'accès par rôle
+- Double authentification TOTP pour les administrateurs
+- Tailwind CSS v4 et tokens de design M2
+- Cloudflare R2 pour les fichiers privés (CV, avatars, logos)
+- Vitest pour les tests
+
+## Périmètre fonctionnel
+
+Le dépôt couvre les modules M0 à M10 :
+
+- socle technique, design et authentification ;
+- profils candidat et entreprise ;
+- fichiers privés et journal d'accès ;
+- consultation publique des offres ;
+- espace recruteur et gestion des offres ;
+- candidatures et cycle de vie ;
+- messagerie, signalements et blocage ;
+- notifications et préférences ;
+- administration et modération M10.
+
+Le détail de la recette, des procédures d'administration et des réserves de
+livraison se trouve dans [`RECETTE-M10.md`](./RECETTE-M10.md).
+
+## Prérequis
+
+- Node.js 24 recommandé, notamment pour la CLI admin qui utilise le type
+  stripping natif.
+- npm.
+- MySQL 8 accessible par `DATABASE_URL`.
+- Un bucket Cloudflare R2 privé pour les fichiers.
+- Facultatif : une clé Resend pour les emails de notification.
+
+## Installation
 
 ```bash
+npm ci
+cp .env.example .env
+npx prisma migrate deploy
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+L'application démarre sur `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+En production :
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npx prisma migrate deploy
+npm run build
+npm start
+```
 
-## Learn More
+Ne jamais lancer `prisma migrate reset` sur une base contenant des données.
 
-To learn more about Next.js, take a look at the following resources:
+## Variables d'environnement
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Les variables attendues sont documentées dans `.env.example` :
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```text
+DATABASE_URL
+NEXT_PUBLIC_APP_URL
+AUTH_SECRET
+ADMIN_2FA_KEY
+R2_ENDPOINT
+R2_BUCKET
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+RESEND_API_KEY
+EMAIL_FROM
+CRON_SECRET
+```
 
-## Deploy on Vercel
+`AUTH_SECRET`, `ADMIN_2FA_KEY` et `CRON_SECRET` se génèrent avec
+`openssl rand -base64 32`. `ADMIN_2FA_KEY` doit décoder exactement 32 octets.
+Aucun secret ne doit être commité.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Commandes utiles
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run dev          # serveur de développement
+npm run build        # build de production
+npm start            # serveur de production
+npm run lint         # ESLint
+npm test             # suite Vitest
+npx tsc --noEmit     # vérification TypeScript
+```
+
+## Administration
+
+Les comptes admin ne sont jamais créés ni promus depuis l'interface. Une
+invitation est émise par la CLI :
+
+```bash
+npm run admin -- invite --email admin@exemple.cm --name "Admin Exemple"
+```
+
+Le jeton d'activation est affiché une seule fois et expire après 24 heures.
+L'activation se fait sur `/activation-admin/<jeton>`, avec mot de passe et
+enregistrement du secret TOTP. La connexion admin passe ensuite par `/login`
+puis `/login/2fa`.
+
+Les actions sensibles exigent une réauthentification de 5 minutes via
+`/admin/reauth`. Les détails des parcours de modération, de suspension et
+d'export d'audit sont dans [`RECETTE-M10.md`](./RECETTE-M10.md).
+
+## Structure
+
+```text
+src/app/          routes et écrans Next.js
+src/app/actions/  Server Actions
+src/lib/          accès base, règles métier, sécurité et libellés
+prisma/           schéma et migrations
+scripts/          CLI admin et migration des fichiers legacy
+```
+
+## Tests et qualité
+
+La suite couvre les matrices d'accès, les fichiers privés, les candidatures,
+la messagerie, les notifications et l'administration M10.
+
+```bash
+npm test
+npx tsc --noEmit
+npm run lint
+npm run build
+```
+
+## Fichiers locaux
+
+`AGENTS.md` est généré localement par `next dev` et ignoré par Git. Il ne fait
+pas partie du code livré.
