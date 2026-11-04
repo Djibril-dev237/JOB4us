@@ -101,7 +101,7 @@ npx vitest run \
   src/lib/audit-url.test.ts
 ```
 
-Résultat : 21 fichiers, 312 tests réussis. Le test comportemental de la route
+Résultat : 21 fichiers, 313 tests réussis. Le test comportemental de la route
 d'export, `src/app/(app)/admin/audit/export/route.test.ts`, couvre en plus les
 quatre cas de garde : redirection sans grant, export avec grant, en-tête de
 troncature et refus de `requireAdmin`.
@@ -404,6 +404,7 @@ e3ee00c  M10 vague 2
 e73ebaa  M10 vague 3
 4a99e4f  M10 vague 4
 5078df2  M10 vague 5
+216fa9c  M10 correction revue
 ```
 
 ### 8.2 Points à transmettre
