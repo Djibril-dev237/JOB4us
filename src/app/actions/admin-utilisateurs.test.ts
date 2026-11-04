@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { reauthAdminValide } from '@/lib/admin-reauth'
 import { requireAdmin } from '@/lib/dal'
 import { consignerAudit } from '@/lib/journal-audit'
-import { notFound, redirect } from 'next/navigation'
+import { redirect } from 'next/navigation'
 
 import { reactiverUtilisateur, suspendreUtilisateur } from './admin-utilisateurs'
 

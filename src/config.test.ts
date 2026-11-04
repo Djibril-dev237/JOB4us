@@ -12,6 +12,30 @@ import { MAX_CV_BYTES, MAX_IMAGE_BYTES } from './lib/files'
 /** `8mb` de la doc Next = 8 * 1024 * 1024 (notation octets du SDK). */
 const MEGA_OCTET = 1024 * 1024
 
+describe('next.config - en-tetes de securite', () => {
+  it('applique les en-tetes de base a toutes les routes', async () => {
+    const regles = await nextConfig.headers?.()
+    expect(regles).toBeDefined()
+    expect(regles?.[0]?.source).toBe('/:path*')
+
+    const enTetes = new Map(
+      (regles?.[0]?.headers ?? []).map((entree) => [entree.key, entree.value]),
+    )
+    expect(enTetes.get('X-Content-Type-Options')).toBe('nosniff')
+    expect(enTetes.get('X-Frame-Options')).toBe('DENY')
+    expect(enTetes.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin')
+    expect(enTetes.get('Permissions-Policy')).toBe(
+      'camera=(), microphone=(), geolocation=()',
+    )
+  })
+
+  it('n emet jamais HSTS hors production', async () => {
+    const regles = await nextConfig.headers?.()
+    const enTetes = (regles?.[0]?.headers ?? []).map((entree) => entree.key)
+    expect(enTetes).not.toContain('Strict-Transport-Security')
+  })
+})
+
 describe('next.config — experimental.serverActions.bodySizeLimit', () => {
   it('dépasse MAX_CV_BYTES : le garde-fou transport ne bloque jamais un fichier accepté par validateUpload', () => {
     const limite = nextConfig.experimental?.serverActions?.bodySizeLimit

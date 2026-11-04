@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Dépôt Laravel historique conservé pour la migration : son vendor et son
+    // code PHP ne font pas partie de l'application Next.js et ont leur propre
+    // outillage. Les linter ici reviendrait à auditer une dépendance externe.
+    "legacy_laravel/**",
   ]),
 ]);
 

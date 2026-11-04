@@ -15,6 +15,38 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "8mb",
     },
   },
+
+  // En-têtes de sécurité appliqués à toutes les routes. Ils ne dépendent
+  // d'aucun secret et ne changent pas le rendu : ils ferment le sniffing MIME,
+  // le cadrage de l'application et les permissions navigateur par défaut.
+  // HSTS n'est ajouté qu'en production, jamais sur le HTTP local.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+          ...(process.env.NODE_ENV === "production"
+            ? [
+                {
+                  key: "Strict-Transport-Security",
+                  value: "max-age=31536000; includeSubDomains",
+                },
+              ]
+            : []),
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

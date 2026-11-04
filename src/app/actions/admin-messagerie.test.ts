@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { requireAdmin } from '@/lib/dal'
-import { accesSignalementValide, reauthAdminValide } from '@/lib/admin-reauth'
-import { consignerAudit } from '@/lib/journal-audit'
-import { notifierDecisionModeration } from '@/lib/notifications-evenements'
-
 import {
   deciderSignalement,
   ouvrirConversationSignalement,

@@ -125,12 +125,28 @@ export const MOTIFS_RETABLISSEMENT = [
 ] as const
 export type MotifRetablissement = (typeof MOTIFS_RETABLISSEMENT)[number]
 
+// Union dédupliquée : `securite`, `fraude` et `autre` apparaissent dans
+// plusieurs contextes. Les répéter produirait des clés React dupliquées dans
+// le filtre d'audit. L'ordre reste stable pour l'affichage et l'export.
 export const MOTIFS_AUDIT = [
-  ...MOTIFS_DECISION_SIGNALEMENT,
-  ...MOTIFS_SUSPENSION_UTILISATEUR,
-  ...MOTIFS_SUSPENSION_OFFRE,
-  ...MOTIFS_ACCES_CONVERSATION,
-  ...MOTIFS_RETABLISSEMENT,
+  'contenu_illicite',
+  'harcelement',
+  'propos_haineux',
+  'spam',
+  'usurpation',
+  'securite',
+  'fraude',
+  'comportement',
+  'demande_utilisateur',
+  'qualite',
+  'signalement',
+  'enquete',
+  'verification_contexte',
+  'recours',
+  'erreur_moderation',
+  'recours_fonde',
+  'decision_annulee',
+  'autre',
 ] as const
 export type MotifAudit = (typeof MOTIFS_AUDIT)[number]
 
