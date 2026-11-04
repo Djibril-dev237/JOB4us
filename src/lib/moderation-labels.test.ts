@@ -65,6 +65,15 @@ describe('motifs de modération', () => {
   })
 
   it('garde la liste d’audit comme union des contextes', () => {
+    const union = new Set([
+      ...MOTIFS_DECISION_SIGNALEMENT,
+      ...MOTIFS_SUSPENSION_UTILISATEUR,
+      ...MOTIFS_SUSPENSION_OFFRE,
+      ...MOTIFS_ACCES_CONVERSATION,
+      ...MOTIFS_RETABLISSEMENT,
+    ])
+
+    expect(new Set(MOTIFS_AUDIT)).toEqual(union)
     expect(new Set(MOTIFS_AUDIT).size).toBe(MOTIFS_AUDIT.length)
     for (const motif of MOTIFS_AUDIT) {
       expect(estMotifAudit(motif)).toBe(true)

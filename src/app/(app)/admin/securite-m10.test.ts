@@ -88,6 +88,12 @@ describe('couverture des gardes admin', () => {
     }
   })
 
+  it("l'export d'audit exige un grant de reauthentification", () => {
+    const source = lire('src/app/(app)/admin/audit/export/route.ts')
+    expect(source).toMatch(/reauthAdminValide\(session\.userId\)/)
+    expect(source).toMatch(/NextResponse\.redirect/)
+  })
+
   it('les traces sont append-only par trigger SQL', () => {
     const sql = lire(
       'prisma/migrations/20261028100001_m10_journal_audit_vue/migration.sql',

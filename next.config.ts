@@ -19,7 +19,9 @@ const nextConfig: NextConfig = {
   // En-têtes de sécurité appliqués à toutes les routes. Ils ne dépendent
   // d'aucun secret et ne changent pas le rendu : ils ferment le sniffing MIME,
   // le cadrage de l'application et les permissions navigateur par défaut.
-  // HSTS n'est ajouté qu'en production, jamais sur le HTTP local.
+  // HSTS n'est ajouté qu'en production, jamais en développement ni en test.
+  // Un build de production lancé en HTTP local l'émet quand même ; les
+  // navigateurs ignorent HSTS sur une origine HTTP non sécurisée.
   async headers() {
     return [
       {

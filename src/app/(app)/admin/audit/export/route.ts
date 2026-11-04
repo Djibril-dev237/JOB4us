@@ -1,3 +1,6 @@
+import { NextResponse } from 'next/server'
+
+import { reauthAdminValide } from '@/lib/admin-reauth'
 import { lireFiltresAudit } from '@/lib/audit-url'
 import { construireCsvAudit } from '@/lib/csv-audit'
 import { requireAdmin } from '@/lib/dal'
@@ -16,8 +19,19 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request): Promise<Response> {
   const session = await requireAdmin()
-
   const url = new URL(request.url)
+
+  // L'export est une action sensible : la session admin prouve l'identité,
+  // pas la présence devant l'écran. Sans grant de 5 minutes, on renvoie vers
+  // la réauthentification en conservant les filtres demandés.
+  if (!(await reauthAdminValide(session.userId))) {
+    const retour = `${url.pathname}${url.search}`
+    return NextResponse.redirect(
+      new URL(`/admin/reauth?retour=${encodeURIComponent(retour)}`, url.origin),
+      307,
+    )
+  }
+
   const { filtres } = lireFiltresAudit(url.searchParams)
   const resultat = await lireJournalAuditPourExport(filtres)
 

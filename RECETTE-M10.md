@@ -2,7 +2,7 @@
 
 Date : 4 novembre 2026
 Périmètre : administration et modération Job4Us (M10)
-Statut : recette technique terminée, réserve PHP documentée
+Statut : recette technique terminée, réserves listées en section 9
 
 ## 1. Objectif
 
@@ -67,7 +67,7 @@ npm start
 | `npx tsc --noEmit` | succès, aucune erreur |
 | `npm run lint` | succès, aucune erreur ni avertissement |
 | `npm run build` | succès, 35 pages générées, routes admin présentes |
-| `npx vitest run` | 79 fichiers, 1293 tests réussis |
+| `npx vitest run` | 80 fichiers, 1299 tests réussis |
 
 `legacy_laravel/**` est exclu du lint Next.js : ce dépôt PHP historique a son
 propre outillage et son vendor. Cette exclusion ne concerne pas le code livré.
@@ -101,7 +101,10 @@ npx vitest run \
   src/lib/audit-url.test.ts
 ```
 
-Résultat : 21 fichiers, 312 tests réussis.
+Résultat : 21 fichiers, 312 tests réussis. Le test comportemental de la route
+d'export, `src/app/(app)/admin/audit/export/route.test.ts`, couvre en plus les
+quatre cas de garde : redirection sans grant, export avec grant, en-tête de
+troncature et refus de `requireAdmin`.
 
 Couverture des points demandés :
 
@@ -148,9 +151,12 @@ Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: camera=(), microphone=(), geolocation=()
 ```
 
-HSTS n'est émis qu'en production, jamais sur le HTTP local. Les cookies de
-challenge, de réauthentification et de consultation privée sont `httpOnly`,
-`SameSite=Lax` et `Secure` en production. Les grants expirent après 5 minutes.
+HSTS n'est émis qu'en production, jamais en développement ni en test. Un build
+de production lancé en HTTP local l'émet quand même ; les navigateurs ignorent
+HSTS sur une origine HTTP non sécurisée. Les cookies de challenge, de
+réauthentification et de consultation privée sont `httpOnly`, `SameSite=Lax`
+et `Secure` en production. Les grants expirent après 5 minutes. Les pages admin
+portent `robots: { index: false, follow: false }` via leur layout.
 
 Recherche de secrets dans le bundle client : aucun des noms
 `AUTH_SECRET`, `ADMIN_2FA_KEY`, `DATABASE_URL`, `R2_SECRET_ACCESS_KEY`,
@@ -207,6 +213,10 @@ Le fichier `src/app/loading.tsx` a été retiré. Avec Next.js 16.3.6, ce bounda
 global laissait le contenu admin dans un `div` masqué et le `main` à une taille
 0 x 0, alors que le HTML était bien rendu. La suppression rétablit
 l'hydratation, le `main` visible et les audits Lighthouse sans échec.
+
+Contrepartie acceptée : il n'existe plus de squelette de chargement global pour
+l'espace admin. Les chargements spécifiques des routes qui en ont besoin,
+notamment sous `(site)/offres`, sont conservés.
 
 ### 4.9 Migration et rollback PHP legacy
 
@@ -324,8 +334,9 @@ au domaine public réel, sans barre oblique finale.
 
 Utiliser `npx prisma migrate deploy` en production. Ne jamais lancer
 `prisma migrate reset` sur une base contenant des données. Sur ce poste,
-`prisma migrate dev` est inutilisable car la migration M7 déjà appliquée est
-détectée comme modifiée ; `migrate deploy` fonctionne.
+`prisma migrate dev` est inutilisable à cause d'une divergence de checksum dans
+l'historique appliqué (`0_init`, ainsi que deux tentatives M7 annulées) ;
+`migrate deploy` fonctionne et ne rejoue pas les migrations appliquées.
 
 ### 6.3 Tâche planifiée des notifications
 
@@ -375,7 +386,9 @@ rollback PHP ou Prisma sur une base de production sans sauvegarde vérifiée.
 
 Les commits M10 sont locaux et non poussés. La vague 5 ajoute la recette, les
 en-têtes de sécurité, la correction du chargement global et la déduplication
-des motifs d'audit.
+des motifs d'audit. La correction issue de la revue indépendante ajoute la
+garde de réauthentification de l'export d'audit, son test de route, le
+verrouillage HSTS de production et le `noindex` de l'espace admin.
 
 Chaîne récente :
 
@@ -390,6 +403,7 @@ add9a9a  M10 vague 1
 e3ee00c  M10 vague 2
 e73ebaa  M10 vague 3
 4a99e4f  M10 vague 4
+5078df2  M10 vague 5
 ```
 
 ### 8.2 Points à transmettre
@@ -408,8 +422,8 @@ e73ebaa  M10 vague 3
 ## 9. Réserves connues
 
 1. PHP legacy bloqué par Windows Defender sur ce poste.
-2. `prisma migrate dev` inutilisable à cause de la migration M7 modifiée ;
-   utiliser `migrate deploy`.
+2. `prisma migrate dev` inutilisable à cause d'une divergence de checksum
+   (`0_init` et deux tentatives M7 annulées) ; utiliser `migrate deploy`.
 3. Lighthouse navigateur sans score de performance ni émulation mobile.
 4. Rate limiting en mémoire, non partagé entre instances.
 5. Procédure CLI d'anonymisation non livrée.

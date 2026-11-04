@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import nextConfig from '../next.config'
 import { MAX_CV_BYTES, MAX_IMAGE_BYTES } from './lib/files'
@@ -33,6 +33,21 @@ describe('next.config - en-tetes de securite', () => {
     const regles = await nextConfig.headers?.()
     const enTetes = (regles?.[0]?.headers ?? []).map((entree) => entree.key)
     expect(enTetes).not.toContain('Strict-Transport-Security')
+  })
+
+  it('emet HSTS en production', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    try {
+      const regles = await nextConfig.headers?.()
+      const enTetes = new Map(
+        (regles?.[0]?.headers ?? []).map((entree) => [entree.key, entree.value]),
+      )
+      expect(enTetes.get('Strict-Transport-Security')).toBe(
+        'max-age=31536000; includeSubDomains',
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })
 
