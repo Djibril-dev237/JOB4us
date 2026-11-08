@@ -1,5 +1,8 @@
 # Job4Us
 
+[![CI](https://github.com/Djibril-dev237/JOB4us/actions/workflows/ci.yml/badge.svg)](https://github.com/Djibril-dev237/JOB4us/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 Plateforme d'emploi pour le Cameroun : offres, candidatures, messagerie,
 notifications et administration. L'application est construite avec Next.js App
 Router, Prisma et MySQL.
@@ -134,6 +137,18 @@ npx tsc --noEmit
 npm run lint
 npm run build
 ```
+
+## Sécurité
+
+Les vulnérabilités doivent être signalées en privé via GitHub Security
+Advisories. Ne pas ouvrir d'issue publique contenant un secret, un mot de passe
+ou une donnée personnelle.
+
+La politique complète est dans [`SECURITY.md`](./SECURITY.md).
+
+## Licence
+
+Ce projet est distribué sous licence MIT. Voir [`LICENSE`](./LICENSE).
 
 ## Fichiers locaux
 
