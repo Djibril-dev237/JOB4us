@@ -1,6 +1,7 @@
 # Job4Us
 
 [![CI](https://github.com/Djibril-dev237/JOB4us/actions/workflows/ci.yml/badge.svg)](https://github.com/Djibril-dev237/JOB4us/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Djibril-dev237/JOB4us?label=release)](https://github.com/Djibril-dev237/JOB4us/releases/tag/v1.0.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 Plateforme d'emploi pour le Cameroun : offres, candidatures, messagerie,
