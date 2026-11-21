@@ -156,6 +156,8 @@ npm run build
 
 - [`RECETTE-M10.md`](./RECETTE-M10.md) : recette, procédures d'administration et
   réserves de livraison.
+- [`DEPLOYMENT.md`](./DEPLOYMENT.md) : déploiement Vercel et variables de
+  production.
 - [`CHANGELOG.md`](./CHANGELOG.md) : historique des versions.
 - [`SECURITY.md`](./SECURITY.md) : politique de signalement des vulnérabilités.
 
