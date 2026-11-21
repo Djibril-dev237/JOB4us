@@ -7,6 +7,19 @@ Plateforme d'emploi pour le Cameroun : offres, candidatures, messagerie,
 notifications et administration. L'application est construite avec Next.js App
 Router, Prisma et MySQL.
 
+## Aperçu
+
+| Accueil | Offres |
+| --- | --- |
+| ![Accueil](docs/screenshots/01-accueil.png) | ![Offres](docs/screenshots/02-offres.png) |
+
+| Tableau de bord admin | Gestion des offres |
+| --- | --- |
+| ![Tableau de bord admin](docs/screenshots/03-admin-dashboard.png) | ![Gestion des offres](docs/screenshots/05-admin-offres.png) |
+
+Captures réalisées avec des données de test. Les autres captures sont dans
+[`docs/screenshots`](./docs/screenshots).
+
 ## Stack
 
 - Next.js 16.3.6 et React 19
@@ -137,6 +150,13 @@ npx tsc --noEmit
 npm run lint
 npm run build
 ```
+
+## Documentation
+
+- [`RECETTE-M10.md`](./RECETTE-M10.md) : recette, procédures d'administration et
+  réserves de livraison.
+- [`CHANGELOG.md`](./CHANGELOG.md) : historique des versions.
+- [`SECURITY.md`](./SECURITY.md) : politique de signalement des vulnérabilités.
 
 ## Sécurité
 
